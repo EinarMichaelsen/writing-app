@@ -24,6 +24,13 @@ export default function EditorPage({ params }: { params: { id: string } }) {
   const editorRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
+  // Handle content changes
+  const handleContentChange = (newContent: string) => {
+    // Ensure we're getting the content in the correct order
+    console.log('New content:', newContent) // Add this debug log
+    setContent(newContent)
+  }
+
   // Handle Tab key for accepting suggestions
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -63,10 +70,6 @@ export default function EditorPage({ params }: { params: { id: string } }) {
     } finally {
       setIsGenerating(false)
     }
-  }
-
-  const handleContentChange = (newContent: string) => {
-    setContent(newContent)
   }
 
   const toggleSidebar = () => {

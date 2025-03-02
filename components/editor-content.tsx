@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { forwardRef, useEffect, useRef, useState } from "react"
+import { forwardRef, useEffect, useRef } from "react"
 import { cn } from "@/lib/utils"
 
 interface EditorContentProps {
@@ -14,73 +14,17 @@ interface EditorContentProps {
 export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
   ({ content, suggestion, onChange, className }, ref) => {
     const editorRef = useRef<HTMLDivElement | null>(null)
-    const [selectionRange, setSelectionRange] = useState<Range | null>(null)
-    const [isComposing, setIsComposing] = useState(false)
 
-    // Combine ref from forwardRef with local ref
-    useEffect(() => {
-      if (typeof ref === "function") {
-        ref(editorRef.current)
-      } else if (ref) {
-        ref.current = editorRef.current
-      }
-    }, [ref])
-
-    // Handle content edits
     const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
-      if (isComposing) return // Skip if we're in IME composition
       const newContent = e.currentTarget.textContent || ""
+      console.log('Editor input:', newContent) // Debug log
       onChange(newContent)
     }
 
-    const handleCompositionStart = () => {
-      setIsComposing(true)
-    }
-
-    const handleCompositionEnd = (e: React.CompositionEvent<HTMLDivElement>) => {
-      setIsComposing(false)
-      const newContent = e.currentTarget.textContent || ""
-      onChange(newContent)
-    }
-
-    // Save selection range when it changes
-    const handleSelectionChange = () => {
-      const selection = window.getSelection()
-      if (selection && selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0)
-        if (editorRef.current?.contains(range.commonAncestorContainer)) {
-          setSelectionRange(range.cloneRange())
-        }
-      }
-    }
-
     useEffect(() => {
-      document.addEventListener("selectionchange", handleSelectionChange)
-      return () => {
-        document.removeEventListener("selectionchange", handleSelectionChange)
-      }
-    }, [])
-
-    // Update editor content when content prop changes
-    useEffect(() => {
-      if (editorRef.current) {
-        const selection = window.getSelection()
-        const currentContent = editorRef.current.textContent
-
-        if (currentContent !== content) {
-          const cursorPosition = selection?.getRangeAt(0)?.startOffset || 0
-          editorRef.current.textContent = content
-
-          // Restore cursor position
-          if (selection && editorRef.current.firstChild) {
-            const range = document.createRange()
-            const newPosition = Math.min(cursorPosition, content.length)
-            range.setStart(editorRef.current.firstChild, newPosition)
-            range.setEnd(editorRef.current.firstChild, newPosition)
-            selection.removeAllRanges()
-            selection.addRange(range)
-          }
-        }
+      if (editorRef.current && editorRef.current.textContent !== content) {
+        console.log('Setting content:', content) // Debug log
+        editorRef.current.textContent = content
       }
     }, [content])
 
@@ -91,14 +35,11 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
             ref={editorRef}
             contentEditable
             className={cn(
-              "min-h-[calc(100vh-10rem)] outline-none prose prose-sm sm:prose-base lg:prose-lg dark:prose-invert prose-headings:font-heading focus:outline-none whitespace-pre-wrap break-words",
+              "min-h-[calc(100vh-10rem)] outline-none prose prose-sm sm:prose-base lg:prose-lg dark:prose-invert prose-headings:font-heading focus:outline-none",
               className
             )}
             onInput={handleInput}
-            onCompositionStart={handleCompositionStart}
-            onCompositionEnd={handleCompositionEnd}
             suppressContentEditableWarning
-            spellCheck="true"
           >
             {content}
           </div>
