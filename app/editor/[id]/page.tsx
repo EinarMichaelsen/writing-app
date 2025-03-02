@@ -12,6 +12,7 @@ import { EditorContent } from "@/components/editor-content"
 import { ChatInterface } from "@/components/chat-interface"
 import { SourcesPanel } from "@/components/sources-panel"
 import { VersionHistory } from "@/components/version-history"
+import { generateSuggestion, isOpenAIConfigured } from "@/lib/openai-config"
 
 export default function EditorPage({ params }: { params: { id: string } }) {
   const [title, setTitle] = useState("Untitled Document")
@@ -21,8 +22,19 @@ export default function EditorPage({ params }: { params: { id: string } }) {
   const [activeTab, setActiveTab] = useState("chat")
   const [isGenerating, setIsGenerating] = useState(false)
   const [suggestion, setSuggestion] = useState("")
+  const [apiConfigured, setApiConfigured] = useState(true) // Assume true initially
   const editorRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
+
+  // Check if OpenAI API is configured
+  useEffect(() => {
+    async function checkApiConfig() {
+      const isConfigured = await isOpenAIConfigured();
+      setApiConfigured(isConfigured);
+    }
+    
+    checkApiConfig();
+  }, []);
 
   // Handle content changes
   const handleContentChange = (newContent: string) => {
@@ -48,29 +60,42 @@ export default function EditorPage({ params }: { params: { id: string } }) {
 
   // Generate next word suggestion when content changes
   useEffect(() => {
+    // Only generate suggestions if API is configured
+    if (!apiConfigured) return;
+    
+    // Only generate suggestions after a short delay since the last keystroke
+    let debounceTimeout: NodeJS.Timeout;
+    
     if (content && isEditing) {
-      generateNextSuggestion(content)
+      debounceTimeout = setTimeout(() => {
+        generateNextSuggestion(content);
+      }, 500); // 500ms delay
     }
-  }, [content, isEditing])
+    
+    return () => {
+      if (debounceTimeout) clearTimeout(debounceTimeout);
+    };
+  }, [content, isEditing, apiConfigured]);
 
   const generateNextSuggestion = async (currentContent: string) => {
-    if (!currentContent || isGenerating) return
+    if (!currentContent || isGenerating || !apiConfigured) return;
 
-    setIsGenerating(true)
+    setIsGenerating(true);
     try {
-      const { text } = await generateText({
-        model: openai("gpt-4o"),
-        prompt: `Continue the following text with a natural suggestion (just a few words, not a full sentence): "${currentContent.slice(-100)}"`,
-        maxTokens: 10,
-      })
-
-      setSuggestion(text)
+      // Use our server-side API endpoint for suggestion generation
+      const suggestion = await generateSuggestion(currentContent, {
+        maxLength: 15,
+        temperature: 0.4,
+      });
+      
+      setSuggestion(suggestion);
     } catch (error) {
-      console.error("Error generating suggestion:", error)
+      console.error("Error generating suggestion:", error);
+      setSuggestion("");
     } finally {
-      setIsGenerating(false)
+      setIsGenerating(false);
     }
-  }
+  };
 
   const toggleSidebar = () => {
     setShowSidebar(!showSidebar)
