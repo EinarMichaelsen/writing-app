@@ -39,20 +39,67 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
       ) {
         return // Let contentEditable handle these keys
       }
+
+      // Handle single character input
+      if (e.key.length === 1) {
+        e.preventDefault()
+        const selection = window.getSelection()
+        const range = selection?.getRangeAt(0)
+        const offset = range?.startOffset || 0
+        
+        const target = e.currentTarget
+        const before = target.textContent?.slice(0, offset) || ""
+        const after = target.textContent?.slice(offset) || ""
+        const newContent = before + e.key + after
+        
+        setLocalContent(newContent)
+        onChange(newContent)
+
+        // Move cursor position
+        requestAnimationFrame(() => {
+          const newRange = document.createRange()
+          const textNode = target.firstChild || target
+          const newPosition = offset + 1
+          newRange.setStart(textNode, newPosition)
+          newRange.setEnd(textNode, newPosition)
+          selection?.removeAllRanges()
+          selection?.addRange(newRange)
+        })
+      }
     }
 
     // Handle content changes
     const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
-      const newContent = e.currentTarget.textContent || ""
-      setLocalContent(newContent)
-      onChange(newContent)
+      const target = e.currentTarget
+      const newContent = target.textContent || ""
+      
+      // Only update if content actually changed
+      if (newContent !== localContent) {
+        setLocalContent(newContent)
+        onChange(newContent)
+      }
     }
 
     // Handle paste events to strip formatting
     const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
       e.preventDefault()
       const text = e.clipboardData.getData('text/plain')
-      document.execCommand('insertText', false, text)
+      const selection = window.getSelection()
+      const range = selection?.getRangeAt(0)
+      
+      if (range) {
+        range.deleteContents()
+        const textNode = document.createTextNode(text)
+        range.insertNode(textNode)
+        range.setStartAfter(textNode)
+        range.setEndAfter(textNode)
+        selection?.removeAllRanges()
+        selection?.addRange(range)
+        
+        const newContent = editorRef.current?.textContent || ""
+        setLocalContent(newContent)
+        onChange(newContent)
+      }
     }
 
     // Update local content when prop changes
@@ -65,7 +112,20 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
     // Update editor content
     useEffect(() => {
       if (editorRef.current && editorRef.current.textContent !== localContent) {
+        const selection = window.getSelection()
+        const range = selection?.getRangeAt(0)
+        const offset = range?.startOffset || 0
+        
         editorRef.current.textContent = localContent
+        
+        if (selection && editorRef.current.firstChild) {
+          const newRange = document.createRange()
+          const newPosition = Math.min(offset, localContent.length)
+          newRange.setStart(editorRef.current.firstChild, newPosition)
+          newRange.setEnd(editorRef.current.firstChild, newPosition)
+          selection.removeAllRanges()
+          selection.addRange(newRange)
+        }
       }
     }, [localContent])
 
@@ -84,9 +144,12 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
             onPaste={handlePaste}
             suppressContentEditableWarning
             spellCheck="true"
+            dir="ltr"
             style={{
-              caretColor: 'auto', // Ensures visible cursor
-              WebkitUserModify: 'read-write-plaintext-only', // Prevents formatting on paste in WebKit
+              caretColor: 'auto',
+              WebkitUserModify: 'read-write-plaintext-only',
+              unicodeBidi: 'isolate',
+              direction: 'ltr'
             }}
           >
             {localContent}
