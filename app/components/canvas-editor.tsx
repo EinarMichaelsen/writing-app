@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { cn } from "@/lib/utils"
 
 interface CanvasEditorProps {
   initialText?: string
@@ -206,7 +207,7 @@ export function CanvasEditor({ initialText = "", onChange, className }: CanvasEd
   return (
     <canvas
       ref={canvasRef}
-      className={`outline-none border border-gray-300 rounded-md ${className || ""}`}
+      className={cn("outline-none border border-input rounded-md", className)}
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onClick={handleCanvasClick}

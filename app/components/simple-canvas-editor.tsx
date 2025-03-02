@@ -2,19 +2,11 @@
 
 import { useEffect, useRef, useState } from "react"
 
-interface CanvasEditorProps {
-  initialText?: string
-  onChange?: (text: string) => void
-  className?: string
-}
-
-export function CanvasEditor({ initialText = "", onChange, className }: CanvasEditorProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+export function SimpleCanvasEditor({ initialText = "", onChange }) {
+  const canvasRef = useRef(null)
   const [text, setText] = useState(initialText)
   const [cursorPosition, setCursorPosition] = useState(initialText.length)
   const [isFocused, setIsFocused] = useState(false)
-  const [canvasWidth, setCanvasWidth] = useState(0)
-  const [canvasHeight, setCanvasHeight] = useState(0)
   
   // Font settings
   const fontSize = 16
@@ -22,7 +14,7 @@ export function CanvasEditor({ initialText = "", onChange, className }: CanvasEd
   const font = `${fontSize}px ${fontFamily}`
   const lineHeight = fontSize * 1.5
   
-  // Set up the canvas and handle resize
+  // Setup canvas when component mounts
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -30,40 +22,25 @@ export function CanvasEditor({ initialText = "", onChange, className }: CanvasEd
     const ctx = canvas.getContext("2d")
     if (!ctx) return
     
-    const resizeCanvas = () => {
+    // Set canvas dimensions
+    const updateCanvasDimensions = () => {
       const rect = canvas.getBoundingClientRect()
-      const dpr = window.devicePixelRatio || 1
+      canvas.width = rect.width
+      canvas.height = rect.height
       
-      // Set canvas dimensions accounting for devicePixelRatio
-      canvas.width = rect.width * dpr
-      canvas.height = rect.height * dpr
-      
-      // Scale canvas context to match devicePixelRatio
-      ctx.scale(dpr, dpr)
-      
-      // Set display size to match the element
-      canvas.style.width = `${rect.width}px`
-      canvas.style.height = `${rect.height}px`
-      
-      setCanvasWidth(rect.width)
-      setCanvasHeight(rect.height)
-      
-      // Update the rendering
+      // Force redraw
       renderText()
     }
     
-    // Initial setup
-    resizeCanvas()
-    
-    // Listen for window resize
-    window.addEventListener("resize", resizeCanvas)
+    updateCanvasDimensions()
+    window.addEventListener("resize", updateCanvasDimensions)
     
     return () => {
-      window.removeEventListener("resize", resizeCanvas)
+      window.removeEventListener("resize", updateCanvasDimensions)
     }
   }, [])
   
-  // Render the text and cursor
+  // Render text and cursor
   const renderText = () => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -71,10 +48,10 @@ export function CanvasEditor({ initialText = "", onChange, className }: CanvasEd
     const ctx = canvas.getContext("2d")
     if (!ctx) return
     
-    // Clear the canvas
-    ctx.clearRect(0, 0, canvas.width / window.devicePixelRatio, canvas.height / window.devicePixelRatio)
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
     
-    // Set text properties
+    // Text settings
     ctx.font = font
     ctx.textBaseline = "top"
     ctx.fillStyle = "black"
@@ -85,31 +62,29 @@ export function CanvasEditor({ initialText = "", onChange, className }: CanvasEd
     const padding = 10
     ctx.fillText(text, padding, padding)
     
-    // Draw cursor if editor is focused
+    // Draw cursor if focused
     if (isFocused) {
-      // Calculate cursor position
+      // Get width of text up to cursor
       let cursorX = padding
       
       if (cursorPosition > 0) {
-        // Measure text width up to cursor position
         const textBeforeCursor = text.substring(0, cursorPosition)
         cursorX += ctx.measureText(textBeforeCursor).width
       }
       
       // Draw cursor line
-      ctx.fillStyle = "#000"
       ctx.fillRect(cursorX, padding, 1, lineHeight)
     }
   }
   
-  // Re-render when text or cursor position changes
+  // Update rendering when state changes
   useEffect(() => {
     renderText()
-  }, [text, cursorPosition, isFocused, canvasWidth, canvasHeight])
+  }, [text, cursorPosition, isFocused])
   
   // Handle keyboard input
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
-    // Prevent default browser behavior for most keys
+  const handleKeyDown = (e) => {
+    // Prevent default except for special keys
     if (e.key !== "F5" && !e.metaKey && !e.ctrlKey) {
       e.preventDefault()
     }
@@ -150,29 +125,28 @@ export function CanvasEditor({ initialText = "", onChange, className }: CanvasEd
     }
   }
   
-  // Handle mouse click for cursor positioning
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Handle click for cursor positioning
+  const handleCanvasClick = (e) => {
     const canvas = canvasRef.current
     if (!canvas) return
     
     const ctx = canvas.getContext("2d")
     if (!ctx) return
     
-    // Get the click position relative to the canvas
+    // Calculate click position
     const rect = canvas.getBoundingClientRect()
     const x = e.clientX - rect.left
     
-    // Set text properties for measurement
-    ctx.font = font
-    
-    // Find the closest character position
+    // Find closest character position
     const padding = 10
     let closestPos = 0
     let minDistance = Number.MAX_VALUE
     
+    // Check each position to find closest to click
+    ctx.font = font
     for (let i = 0; i <= text.length; i++) {
-      const textWidth = ctx.measureText(text.substring(0, i)).width
-      const charX = padding + textWidth
+      const textBeforeCursor = text.substring(0, i)
+      const charX = padding + ctx.measureText(textBeforeCursor).width
       const distance = Math.abs(x - charX)
       
       if (distance < minDistance) {
@@ -184,36 +158,15 @@ export function CanvasEditor({ initialText = "", onChange, className }: CanvasEd
     setCursorPosition(closestPos)
   }
   
-  // Prevent losing focus when clicking inside the canvas
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    e.preventDefault() // Prevent canvas from taking focus away
-    canvasRef.current?.focus()
-    setIsFocused(true)
-  }
-  
-  // Handle paste events
-  const handlePaste = (e: React.ClipboardEvent<HTMLCanvasElement>) => {
-    e.preventDefault()
-    const pasteText = e.clipboardData.getData("text/plain")
-    if (!pasteText) return
-    
-    const newText = text.slice(0, cursorPosition) + pasteText + text.slice(cursorPosition)
-    setText(newText)
-    setCursorPosition(cursorPosition + pasteText.length)
-    onChange?.(newText)
-  }
-  
   return (
     <canvas
       ref={canvasRef}
-      className={`outline-none border border-gray-300 rounded-md ${className || ""}`}
+      className="outline-none border border-gray-300 rounded-md"
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onClick={handleCanvasClick}
-      onMouseDown={handleMouseDown}
       onFocus={() => setIsFocused(true)}
       onBlur={() => setIsFocused(false)}
-      onPaste={handlePaste}
       style={{ width: "100%", height: "300px" }}
     />
   )
