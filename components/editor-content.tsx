@@ -44,27 +44,51 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
       if (e.key.length === 1) {
         e.preventDefault()
         const selection = window.getSelection()
-        const range = selection?.getRangeAt(0)
-        const offset = range?.startOffset || 0
-        
-        const target = e.currentTarget
-        const before = target.textContent?.slice(0, offset) || ""
-        const after = target.textContent?.slice(offset) || ""
-        const newContent = before + e.key + after
-        
-        setLocalContent(newContent)
-        onChange(newContent)
+        if (!selection) return
 
-        // Move cursor position
-        requestAnimationFrame(() => {
-          const newRange = document.createRange()
-          const textNode = target.firstChild || target
-          const newPosition = offset + 1
-          newRange.setStart(textNode, newPosition)
-          newRange.setEnd(textNode, newPosition)
-          selection?.removeAllRanges()
-          selection?.addRange(newRange)
-        })
+        // Check if there's a selection range
+        const hasSelection = !selection.isCollapsed
+        
+        if (hasSelection) {
+          // Replace selected text with new character
+          const range = selection.getRangeAt(0)
+          range.deleteContents()
+          const textNode = document.createTextNode(e.key)
+          range.insertNode(textNode)
+          
+          // Move cursor after inserted character
+          range.setStartAfter(textNode)
+          range.setEndAfter(textNode)
+          selection.removeAllRanges()
+          selection.addRange(range)
+          
+          const newContent = editorRef.current?.textContent || ""
+          setLocalContent(newContent)
+          onChange(newContent)
+        } else {
+          // Normal character insertion
+          const range = selection.getRangeAt(0)
+          const offset = range.startOffset
+          
+          const target = e.currentTarget
+          const before = target.textContent?.slice(0, offset) || ""
+          const after = target.textContent?.slice(offset) || ""
+          const newContent = before + e.key + after
+          
+          setLocalContent(newContent)
+          onChange(newContent)
+
+          // Move cursor position
+          requestAnimationFrame(() => {
+            const newRange = document.createRange()
+            const textNode = target.firstChild || target
+            const newPosition = offset + 1
+            newRange.setStart(textNode, newPosition)
+            newRange.setEnd(textNode, newPosition)
+            selection.removeAllRanges()
+            selection.addRange(newRange)
+          })
+        }
       }
     }
 
