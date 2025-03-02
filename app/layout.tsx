@@ -3,6 +3,7 @@ import "@/styles/globals.css"
 import { Inter } from 'next/font/google'
 import type { Metadata } from "next"
 import { cn } from "@/lib/utils"
+import { Analytics } from '@vercel/analytics/react'
 
 // Use only Inter font from Google Fonts
 const inter = Inter({ 
@@ -26,6 +27,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={cn("min-h-screen bg-background font-sans antialiased", inter.variable)}>
         {children}
+        <Analytics />
       </body>
     </html>
   )
