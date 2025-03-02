@@ -15,8 +15,9 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
   ({ content, suggestion, onChange, className }, ref) => {
     const editorRef = useRef<HTMLDivElement | null>(null)
     const [localContent, setLocalContent] = useState(content)
+    const isComposingRef = useRef(false)
 
-    // Handle keyboard shortcuts
+    // Handle keyboard shortcuts and special keys
     const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
       // Allow all standard keyboard shortcuts
       if (e.metaKey || e.ctrlKey) {
@@ -36,34 +37,44 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
         const after = target.textContent?.slice(offset) || ""
         const newContent = before + suggestion + after
 
-        target.textContent = newContent
-        onChange(newContent)
-        setLocalContent(newContent)
-
-        // Set cursor position after suggestion
-        const newRange = document.createRange()
-        const textNode = target.firstChild || target
-        const newPosition = offset + suggestion.length
-        newRange.setStart(textNode, newPosition)
-        newRange.setEnd(textNode, newPosition)
-        selection.removeAllRanges()
-        selection.addRange(newRange)
+        // Use execCommand for better undo/redo support
+        document.execCommand('insertText', false, suggestion)
+        
+        const finalContent = target.textContent || ""
+        setLocalContent(finalContent)
+        onChange(finalContent)
       }
+    }
+
+    // Handle IME composition
+    const handleCompositionStart = () => {
+      isComposingRef.current = true
+    }
+
+    const handleCompositionEnd = () => {
+      isComposingRef.current = false
     }
 
     // Handle content changes
     const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
-      const newContent = e.currentTarget.textContent || ""
+      if (isComposingRef.current) return
+
+      const target = e.currentTarget
+      const newContent = target.textContent || ""
+
+      // Only update if content actually changed
       if (newContent !== localContent) {
         setLocalContent(newContent)
         onChange(newContent)
       }
     }
 
-    // Handle paste events to strip formatting
+    // Handle paste events
     const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
       e.preventDefault()
       const text = e.clipboardData.getData('text/plain')
+      
+      // Use execCommand for better undo/redo support
       document.execCommand('insertText', false, text)
       
       const newContent = e.currentTarget.textContent || ""
@@ -71,21 +82,27 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
       onChange(newContent)
     }
 
-    // Update local content when prop changes
+    // Update content when prop changes
     useEffect(() => {
       if (content !== localContent && editorRef.current) {
         const selection = window.getSelection()
+        const activeElement = document.activeElement
+        const isEditorFocused = editorRef.current.contains(activeElement)
+        
+        // Store cursor position
         const range = selection?.getRangeAt(0)
-        const isAtEnd = range?.startOffset === localContent.length
-
+        const offset = range?.startOffset || 0
+        
+        // Update content
         editorRef.current.textContent = content
         setLocalContent(content)
 
-        // Restore cursor position if it was at the end
-        if (isAtEnd && selection && editorRef.current.firstChild) {
+        // Restore cursor position if editor is focused
+        if (isEditorFocused && selection && editorRef.current.firstChild) {
           const newRange = document.createRange()
-          newRange.setStart(editorRef.current.firstChild, content.length)
-          newRange.setEnd(editorRef.current.firstChild, content.length)
+          const newPosition = Math.min(offset, content.length)
+          newRange.setStart(editorRef.current.firstChild, newPosition)
+          newRange.setEnd(editorRef.current.firstChild, newPosition)
           selection.removeAllRanges()
           selection.addRange(newRange)
         }
@@ -105,13 +122,13 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
             onKeyDown={handleKeyDown}
             onInput={handleInput}
             onPaste={handlePaste}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
             suppressContentEditableWarning
             spellCheck="true"
-            dir="ltr"
             style={{
               caretColor: 'auto',
               WebkitUserModify: 'read-write-plaintext-only',
-              unicodeBidi: 'isolate',
               direction: 'ltr'
             }}
           >
