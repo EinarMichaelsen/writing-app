@@ -16,54 +16,43 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
     const editorRef = useRef<HTMLDivElement | null>(null)
     const [localContent, setLocalContent] = useState(content)
 
-    // Handle keydown events to prevent text reversal
+    // Handle all keyboard events
     const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-      const target = e.currentTarget
-      const selection = window.getSelection()
-      const range = selection?.getRangeAt(0)
-      const offset = range?.startOffset || 0
-      
-      // Handle regular input
-      if (e.key.length === 1) { // Single character
-        e.preventDefault()
-        const before = target.textContent?.slice(0, offset) || ""
-        const after = target.textContent?.slice(offset) || ""
-        const newContent = before + e.key + after
-        
-        setLocalContent(newContent)
-        onChange(newContent)
-        
-        // Move cursor position
-        requestAnimationFrame(() => {
-          const newRange = document.createRange()
-          newRange.setStart(target.firstChild || target, offset + 1)
-          newRange.setEnd(target.firstChild || target, offset + 1)
-          selection?.removeAllRanges()
-          selection?.addRange(newRange)
-        })
+      // Allow default behavior for common keyboard shortcuts
+      if (
+        (e.metaKey || e.ctrlKey) && // Command/Control key
+        ['a', 'c', 'v', 'x', 'z', 'y'].includes(e.key.toLowerCase())
+      ) {
+        return // Let the browser handle these shortcuts
       }
-      
-      // Handle backspace
-      if (e.key === 'Backspace') {
-        e.preventDefault()
-        if (offset > 0) {
-          const before = target.textContent?.slice(0, offset - 1) || ""
-          const after = target.textContent?.slice(offset) || ""
-          const newContent = before + after
-          
-          setLocalContent(newContent)
-          onChange(newContent)
-          
-          // Move cursor position
-          requestAnimationFrame(() => {
-            const newRange = document.createRange()
-            newRange.setStart(target.firstChild || target, offset - 1)
-            newRange.setEnd(target.firstChild || target, offset - 1)
-            selection?.removeAllRanges()
-            selection?.addRange(newRange)
-          })
-        }
+
+      // Let the contentEditable handle most keys naturally
+      if (
+        e.key === 'Backspace' ||
+        e.key === 'Delete' ||
+        e.key === 'Enter' ||
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowRight' ||
+        e.key === 'ArrowUp' ||
+        e.key === 'ArrowDown' ||
+        e.key === 'Tab'
+      ) {
+        return // Let contentEditable handle these keys
       }
+    }
+
+    // Handle content changes
+    const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
+      const newContent = e.currentTarget.textContent || ""
+      setLocalContent(newContent)
+      onChange(newContent)
+    }
+
+    // Handle paste events to strip formatting
+    const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      const text = e.clipboardData.getData('text/plain')
+      document.execCommand('insertText', false, text)
     }
 
     // Update local content when prop changes
@@ -87,12 +76,18 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
             ref={editorRef}
             contentEditable
             className={cn(
-              "min-h-[calc(100vh-10rem)] outline-none prose prose-sm sm:prose-base lg:prose-lg dark:prose-invert prose-headings:font-heading focus:outline-none",
+              "min-h-[calc(100vh-10rem)] outline-none prose prose-sm sm:prose-base lg:prose-lg dark:prose-invert prose-headings:font-heading focus:outline-none whitespace-pre-wrap break-words",
               className
             )}
             onKeyDown={handleKeyDown}
+            onInput={handleInput}
+            onPaste={handlePaste}
             suppressContentEditableWarning
             spellCheck="true"
+            style={{
+              caretColor: 'auto', // Ensures visible cursor
+              WebkitUserModify: 'read-write-plaintext-only', // Prevents formatting on paste in WebKit
+            }}
           >
             {localContent}
           </div>
