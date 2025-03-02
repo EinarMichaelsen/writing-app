@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { forwardRef, useEffect, useRef } from "react"
+import { forwardRef, useEffect, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 
 interface EditorContentProps {
@@ -14,19 +14,71 @@ interface EditorContentProps {
 export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
   ({ content, suggestion, onChange, className }, ref) => {
     const editorRef = useRef<HTMLDivElement | null>(null)
+    const [localContent, setLocalContent] = useState(content)
 
-    const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
-      const newContent = e.currentTarget.textContent || ""
-      console.log('Editor input:', newContent) // Debug log
-      onChange(newContent)
+    // Handle keydown events to prevent text reversal
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const target = e.currentTarget
+      const selection = window.getSelection()
+      const range = selection?.getRangeAt(0)
+      const offset = range?.startOffset || 0
+      
+      // Handle regular input
+      if (e.key.length === 1) { // Single character
+        e.preventDefault()
+        const before = target.textContent?.slice(0, offset) || ""
+        const after = target.textContent?.slice(offset) || ""
+        const newContent = before + e.key + after
+        
+        setLocalContent(newContent)
+        onChange(newContent)
+        
+        // Move cursor position
+        requestAnimationFrame(() => {
+          const newRange = document.createRange()
+          newRange.setStart(target.firstChild || target, offset + 1)
+          newRange.setEnd(target.firstChild || target, offset + 1)
+          selection?.removeAllRanges()
+          selection?.addRange(newRange)
+        })
+      }
+      
+      // Handle backspace
+      if (e.key === 'Backspace') {
+        e.preventDefault()
+        if (offset > 0) {
+          const before = target.textContent?.slice(0, offset - 1) || ""
+          const after = target.textContent?.slice(offset) || ""
+          const newContent = before + after
+          
+          setLocalContent(newContent)
+          onChange(newContent)
+          
+          // Move cursor position
+          requestAnimationFrame(() => {
+            const newRange = document.createRange()
+            newRange.setStart(target.firstChild || target, offset - 1)
+            newRange.setEnd(target.firstChild || target, offset - 1)
+            selection?.removeAllRanges()
+            selection?.addRange(newRange)
+          })
+        }
+      }
     }
 
+    // Update local content when prop changes
     useEffect(() => {
-      if (editorRef.current && editorRef.current.textContent !== content) {
-        console.log('Setting content:', content) // Debug log
-        editorRef.current.textContent = content
+      if (content !== localContent) {
+        setLocalContent(content)
       }
     }, [content])
+
+    // Update editor content
+    useEffect(() => {
+      if (editorRef.current && editorRef.current.textContent !== localContent) {
+        editorRef.current.textContent = localContent
+      }
+    }, [localContent])
 
     return (
       <div className="relative h-full overflow-auto bg-background">
@@ -38,10 +90,11 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
               "min-h-[calc(100vh-10rem)] outline-none prose prose-sm sm:prose-base lg:prose-lg dark:prose-invert prose-headings:font-heading focus:outline-none",
               className
             )}
-            onInput={handleInput}
+            onKeyDown={handleKeyDown}
             suppressContentEditableWarning
+            spellCheck="true"
           >
-            {content}
+            {localContent}
           </div>
           {suggestion && (
             <div className="text-muted-foreground opacity-70 mt-1 pl-1">
