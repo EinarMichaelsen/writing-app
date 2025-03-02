@@ -26,18 +26,46 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
         return // Let the browser handle these shortcuts
       }
 
-      // Let the contentEditable handle most keys naturally
+      // Handle Enter key to maintain cursor position
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        const selection = window.getSelection()
+        if (!selection) return
+
+        const range = selection.getRangeAt(0)
+        const offset = range.startOffset
+        const target = e.currentTarget
+        const before = target.textContent?.slice(0, offset) || ""
+        const after = target.textContent?.slice(offset) || ""
+        const newContent = before + "\n" + after
+
+        setLocalContent(newContent)
+        onChange(newContent)
+
+        // Set cursor position after the newline
+        requestAnimationFrame(() => {
+          const newRange = document.createRange()
+          const textNode = target.firstChild || target
+          const newPosition = offset + 1
+          newRange.setStart(textNode, newPosition)
+          newRange.setEnd(textNode, newPosition)
+          selection.removeAllRanges()
+          selection.addRange(newRange)
+        })
+        return
+      }
+
+      // Let contentEditable handle navigation keys naturally
       if (
         e.key === 'Backspace' ||
         e.key === 'Delete' ||
-        e.key === 'Enter' ||
         e.key === 'ArrowLeft' ||
         e.key === 'ArrowRight' ||
         e.key === 'ArrowUp' ||
         e.key === 'ArrowDown' ||
         e.key === 'Tab'
       ) {
-        return // Let contentEditable handle these keys
+        return
       }
 
       // Handle single character input
@@ -46,58 +74,60 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
         const selection = window.getSelection()
         if (!selection) return
 
-        // Check if there's a selection range
-        const hasSelection = !selection.isCollapsed
-        
-        if (hasSelection) {
-          // Replace selected text with new character
-          const range = selection.getRangeAt(0)
-          range.deleteContents()
-          const textNode = document.createTextNode(e.key)
-          range.insertNode(textNode)
-          
-          // Move cursor after inserted character
-          range.setStartAfter(textNode)
-          range.setEndAfter(textNode)
-          selection.removeAllRanges()
-          selection.addRange(range)
-          
-          const newContent = editorRef.current?.textContent || ""
-          setLocalContent(newContent)
-          onChange(newContent)
-        } else {
-          // Normal character insertion
-          const range = selection.getRangeAt(0)
-          const offset = range.startOffset
-          
-          const target = e.currentTarget
-          const before = target.textContent?.slice(0, offset) || ""
-          const after = target.textContent?.slice(offset) || ""
+        const range = selection.getRangeAt(0)
+        const target = e.currentTarget
+
+        // Handle text replacement when there's a selection
+        if (!selection.isCollapsed) {
+          const selectionRange = selection.getRangeAt(0)
+          const startOffset = selectionRange.startOffset
+          const before = target.textContent?.slice(0, startOffset) || ""
+          const after = target.textContent?.slice(selectionRange.endOffset) || ""
           const newContent = before + e.key + after
-          
+
           setLocalContent(newContent)
           onChange(newContent)
 
-          // Move cursor position
+          // Position cursor after the new character
           requestAnimationFrame(() => {
             const newRange = document.createRange()
             const textNode = target.firstChild || target
-            const newPosition = offset + 1
+            const newPosition = startOffset + 1
             newRange.setStart(textNode, newPosition)
             newRange.setEnd(textNode, newPosition)
             selection.removeAllRanges()
             selection.addRange(newRange)
           })
+          return
         }
+
+        // Normal character insertion
+        const offset = range.startOffset
+        const before = target.textContent?.slice(0, offset) || ""
+        const after = target.textContent?.slice(offset) || ""
+        const newContent = before + e.key + after
+
+        setLocalContent(newContent)
+        onChange(newContent)
+
+        // Position cursor after the new character
+        requestAnimationFrame(() => {
+          const newRange = document.createRange()
+          const textNode = target.firstChild || target
+          const newPosition = offset + 1
+          newRange.setStart(textNode, newPosition)
+          newRange.setEnd(textNode, newPosition)
+          selection.removeAllRanges()
+          selection.addRange(newRange)
+        })
       }
     }
 
-    // Handle content changes
+    // Handle content changes from IME input or other sources
     const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
       const target = e.currentTarget
       const newContent = target.textContent || ""
       
-      // Only update if content actually changed
       if (newContent !== localContent) {
         setLocalContent(newContent)
         onChange(newContent)
