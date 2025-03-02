@@ -15,6 +15,7 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
   ({ content, suggestion, onChange, className }, ref) => {
     const editorRef = useRef<HTMLDivElement | null>(null)
     const [selectionRange, setSelectionRange] = useState<Range | null>(null)
+    const [internalContent, setInternalContent] = useState(content)
 
     // Combine ref from forwardRef with local ref
     useEffect(() => {
@@ -27,7 +28,9 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
 
     // Handle content edits
     const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
-      const newContent = e.currentTarget.innerText
+      const target = e.currentTarget
+      const newContent = target.textContent || ""
+      setInternalContent(newContent)
       onChange(newContent)
     }
 
@@ -51,10 +54,22 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
 
     // Update editor content when content prop changes
     useEffect(() => {
-      if (editorRef.current) {
-        // Only update if the content is different to avoid cursor jumping
-        if (editorRef.current.innerText !== content) {
-          editorRef.current.innerText = content
+      if (editorRef.current && content !== internalContent) {
+        const selection = window.getSelection()
+        const range = selection?.getRangeAt(0)
+        const start = range?.startOffset || 0
+        const end = range?.endOffset || 0
+
+        editorRef.current.textContent = content
+        setInternalContent(content)
+
+        // Restore cursor position
+        if (selection && range) {
+          const newRange = document.createRange()
+          newRange.setStart(editorRef.current.firstChild || editorRef.current, start)
+          newRange.setEnd(editorRef.current.firstChild || editorRef.current, end)
+          selection.removeAllRanges()
+          selection.addRange(newRange)
         }
       }
     }, [content])
@@ -67,17 +82,11 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
             contentEditable
             className={cn(
               "min-h-[calc(100vh-10rem)] outline-none prose prose-sm sm:prose-base lg:prose-lg dark:prose-invert prose-headings:font-heading focus:outline-none",
-              "text-left direction-ltr",
-              className,
+              className
             )}
             onInput={handleInput}
             suppressContentEditableWarning
-            dir="ltr"
-            style={{
-              unicodeBidi: 'normal',
-              textAlign: 'left',
-              direction: 'ltr'
-            }}
+            spellCheck="true"
           >
             {content}
           </div>
@@ -89,7 +98,7 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
         </div>
       </div>
     )
-  },
+  }
 )
 
 EditorContent.displayName = "EditorContent"
