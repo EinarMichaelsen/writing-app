@@ -3,6 +3,5 @@
   "/editor/tiptap-editor/page": "app/editor/tiptap-editor/page.js",
   "/editor/hybrid-canvas/page": "app/editor/hybrid-canvas/page.js",
   "/editor/clean-canvas/page": "app/editor/clean-canvas/page.js",
-  "/editor/canvas-tiptap/page": "app/editor/canvas-tiptap/page.js",
-  "/api/test-openai/route": "app/api/test-openai/route.js"
+  "/editor/canvas-tiptap/page": "app/editor/canvas-tiptap/page.js"
 }
