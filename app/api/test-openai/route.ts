@@ -3,13 +3,21 @@ import { NextResponse } from 'next/server';
 
 export async function GET() {
   try {
+    // Check if API key exists
+    if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json({ 
+        success: false, 
+        message: "OpenAI API key is missing in environment variables",
+      }, { status: 500 });
+    }
+    
     const openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     });
     
     // Simple test completion
     const completion = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4o",
       messages: [{ role: "user", content: "Hello, are you working?" }],
     });
     
@@ -23,7 +31,7 @@ export async function GET() {
     return NextResponse.json({ 
       success: false, 
       message: "API key is not working correctly",
-      error: error.message 
+      error: error instanceof Error ? error.message : String(error)
     }, { status: 500 });
   }
 } 
