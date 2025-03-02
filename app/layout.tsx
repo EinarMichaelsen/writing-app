@@ -1,12 +1,27 @@
 import type React from "react"
 import "@/styles/globals.css"
-import { Mona_Sans as FontSans } from "next/font/google"
+import { Inter } from 'next/font/google'
+import localFont from 'next/font/local'
 import type { Metadata } from "next"
 import { cn } from "@/lib/utils"
 
-const fontSans = FontSans({
-  subsets: ["latin"],
-  variable: "--font-sans",
+const inter = Inter({ subsets: ['latin'] })
+
+const monaSans = localFont({
+  src: [
+    {
+      path: '../public/fonts/MonaSans-Regular.woff2',
+      weight: '400',
+      style: 'normal',
+    },
+    {
+      path: '../public/fonts/MonaSans-Bold.woff2',
+      weight: '700',
+      style: 'normal',
+    },
+    // Add other weights/styles as needed
+  ],
+  variable: '--font-mona-sans',
 })
 
 export const metadata: Metadata = {
@@ -22,12 +37,10 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={cn("min-h-screen bg-background font-sans antialiased", fontSans.variable)}>{children}</body>
+    <html lang="en" suppressHydrationWarning className={cn(inter.className, monaSans.className)}>
+      <body>{children}</body>
     </html>
   )
 }
-
-
 
 import './globals.css'
