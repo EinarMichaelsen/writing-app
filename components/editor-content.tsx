@@ -47,7 +47,7 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
       return () => {
         document.removeEventListener("selectionchange", handleSelectionChange)
       }
-    }, []) // Removed handleSelectionChange from dependencies
+    }, [])
 
     // Update editor content when content prop changes
     useEffect(() => {
@@ -67,10 +67,17 @@ export const EditorContent = forwardRef<HTMLDivElement, EditorContentProps>(
             contentEditable
             className={cn(
               "min-h-[calc(100vh-10rem)] outline-none prose prose-sm sm:prose-base lg:prose-lg dark:prose-invert prose-headings:font-heading focus:outline-none",
+              "text-left direction-ltr",
               className,
             )}
             onInput={handleInput}
             suppressContentEditableWarning
+            dir="ltr"
+            style={{
+              unicodeBidi: 'normal',
+              textAlign: 'left',
+              direction: 'ltr'
+            }}
           >
             {content}
           </div>
