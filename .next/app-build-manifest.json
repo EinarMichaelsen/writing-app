@@ -1,10 +1,5 @@
 {
   "pages": {
-    "/editor/canvas-test/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/editor/canvas-test/page.js"
-    ],
     "/layout": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
@@ -15,6 +10,14 @@
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/page.js"
+    ],
+    "/editor/[id]/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/editor/[id]/page.js"
+    ]
+  }
+}s"
     ],
     "/editor/[id]/page": [
       "static/chunks/webpack.js",

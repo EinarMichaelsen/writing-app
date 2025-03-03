@@ -24,6 +24,8 @@ export default function EditorPage({ params }: { params: { id: string } }) {
   const [apiConfigured, setApiConfigured] = useState(true) // Assume true initially
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [consecutiveErrors, setConsecutiveErrors] = useState(0)
+  const [suggestionsDisabled, setSuggestionsDisabled] = useState(false)
+  const [lastSuggestionTime, setLastSuggestionTime] = useState(0)
   const editorRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
@@ -40,7 +42,7 @@ export default function EditorPage({ params }: { params: { id: string } }) {
         }
       } catch (error) {
         console.error("Error checking API configuration:", error);
-        setErrorMessage("Could not verify API configuration");
+        // Don't show error to user since suggestions can still work with fallbacks
       }
     }
     
@@ -73,76 +75,102 @@ export default function EditorPage({ params }: { params: { id: string } }) {
 
   // Generate next word suggestion when content changes
   useEffect(() => {
-    // Only generate suggestions if API is configured
-    if (!apiConfigured || errorMessage) return;
+    // Don't generate if suggestions are disabled or too many errors
+    if (suggestionsDisabled) return;
     
     // Only generate suggestions after a short delay since the last keystroke
     let debounceTimeout: NodeJS.Timeout;
     
-    if (content && isEditing && consecutiveErrors < 3) {
-      debounceTimeout = setTimeout(() => {
-        generateNextSuggestion(content);
-      }, 800); // Increased to 800ms for less frequent API calls
+    if (content && isEditing) {
+      // Adaptive debounce time - longer when experiencing errors
+      const debounceTime = consecutiveErrors > 0 ? 1500 : 800;
+      
+      // Only generate if it's been at least 2 seconds since the last attempt
+      const now = Date.now();
+      const timeSinceLastSuggestion = now - lastSuggestionTime;
+      
+      if (timeSinceLastSuggestion > 2000) {
+        debounceTimeout = setTimeout(() => {
+          generateNextSuggestion(content);
+          setLastSuggestionTime(Date.now());
+        }, debounceTime);
+      }
     }
     
     return () => {
       if (debounceTimeout) clearTimeout(debounceTimeout);
     };
-  }, [content, isEditing, apiConfigured, errorMessage, consecutiveErrors]);
+  }, [content, isEditing, suggestionsDisabled, consecutiveErrors, lastSuggestionTime]);
 
   const generateNextSuggestion = async (currentContent: string) => {
-    if (!currentContent || isGenerating || !apiConfigured || errorMessage) return;
+    if (!currentContent || isGenerating || suggestionsDisabled) return;
 
     setIsGenerating(true);
     try {
       // Use our server-side API endpoint for suggestion generation
       const suggestion = await generateSuggestion(currentContent, {
-        maxTokens: 15,
+        maxTokens: 10, // Reduced from 15 to 10
         temperature: 0.4,
-        maxRetries: 2,
-        timeout: 12000, // 12 second client-side timeout (shorter than server to avoid race conditions)
+        maxRetries: 1,  // Reduced from 2 to 1
+        timeout: 8000,  // Reduced from 12000 to 8000
       });
       
-      setSuggestion(suggestion);
-      // Reset consecutive errors on success
-      if (consecutiveErrors > 0) {
-        setConsecutiveErrors(0);
-        setErrorMessage(null);
+      // Only set the suggestion if it's not empty and not just whitespace
+      if (suggestion && suggestion.trim()) {
+        setSuggestion(suggestion);
+        
+        // Reset consecutive errors on success
+        if (consecutiveErrors > 0) {
+          setConsecutiveErrors(0);
+          setErrorMessage(null);
+        }
+      } else {
+        // Empty suggestions should not show
+        setSuggestion("");
       }
     } catch (error: any) {
       console.error("Error generating suggestion:", error);
       setSuggestion("");
       
-      // Track consecutive errors
-      setConsecutiveErrors(prev => prev + 1);
+      // Increment consecutive errors, but cap at 5
+      setConsecutiveErrors(prev => Math.min(prev + 1, 5));
       
-      // Set appropriate error message
+      // Handle different error types
       if (error.message?.includes('timed out') || error.message?.includes('504')) {
-        // For timeout errors, silently retry without showing error to user until consecutive errors
-        if (consecutiveErrors >= 2) {
-          setErrorMessage("API requests timing out. Will resume shortly.");
+        // For timeout errors, retry silently up to 3 times
+        if (consecutiveErrors >= 3) {
+          // After 3 timeouts, show an error and back off
+          setErrorMessage("Suggestions are timing out. We'll try again shortly.");
+          
+          // Temporarily disable suggestions
+          setSuggestionsDisabled(true);
+          setTimeout(() => {
+            setSuggestionsDisabled(false);
+            setConsecutiveErrors(0);
+            setErrorMessage(null);
+          }, 15000); // 15 second backoff
         }
       } else if (error.message?.includes('Authentication')) {
-        // For auth errors, try to continue without showing error unless repeatedly failing
-        if (consecutiveErrors >= 1) {
-          setErrorMessage("Check your DeepSeek API key in environment variables.");
-        }
-      } else {
-        // Generic message for other errors
-        const shortError = error.message?.substring(0, 50) || "Unknown error";
-        setErrorMessage(`Error: ${shortError}. Will retry soon.`);
-      }
-      
-      // After 3 consecutive errors, temporarily disable suggestions for 60 seconds
-      if (consecutiveErrors >= 2) {
-        const backoffTime = 60000; // 60 seconds
-        console.log(`Too many errors (${consecutiveErrors}). Backing off for ${backoffTime/1000}s`);
+        setErrorMessage("DeepSeek API authentication error. Check your API key.");
         
+        // For auth errors, disable suggestions for a longer period
+        setSuggestionsDisabled(true);
         setTimeout(() => {
-          setConsecutiveErrors(0);
-          setErrorMessage(null);
-          console.log("Resuming suggestions after backoff period");
-        }, backoffTime);
+          setSuggestionsDisabled(false);
+        }, 30000); // 30 second backoff for auth errors
+      } else {
+        // For other errors, show a message after multiple failures
+        if (consecutiveErrors >= 2) {
+          setErrorMessage("Having trouble generating suggestions. Will try again shortly.");
+          
+          // Exponential backoff based on consecutive errors (2s, 4s, 8s, 16s, etc.)
+          const backoffTime = Math.min(2000 * Math.pow(2, consecutiveErrors - 1), 30000);
+          
+          setSuggestionsDisabled(true);
+          setTimeout(() => {
+            setSuggestionsDisabled(false);
+          }, backoffTime);
+        }
       }
     } finally {
       // Always reset generating state

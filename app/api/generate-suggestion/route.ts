@@ -2,147 +2,193 @@ import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
 // Set a reasonable timeout for the DeepSeek API call - shorter than Vercel's 60s limit
-const API_TIMEOUT = 25000; // 25 seconds
+const API_TIMEOUT = 10000; // Reduced to 10 seconds
 
-// Configure for longer execution
+// Configure for execution
 export const config = {
-  maxDuration: 58, // Max duration in seconds (just under Vercel's 60s limit)
+  maxDuration: 25, // Reduced from 58 to 25 seconds to ensure faster response
+  runtime: 'edge', // Use edge runtime for better performance
+}
+
+// Simple local fallback generation function
+function generateSimpleFallback(text: string): string {
+  if (!text || text.length < 2) return "and then";
+  
+  // Get the last few words
+  const words = text.trim().split(/\s+/);
+  const lastWord = words[words.length - 1];
+  
+  // Simple fallback options based on the last word
+  if (lastWord.endsWith('.')) return "The";
+  if (lastWord.endsWith('?')) return "I";
+  if (lastWord.endsWith('!')) return "This";
+  
+  // Common continuations
+  if (lastWord === "the") return "most";
+  if (lastWord === "a") return "few";
+  if (lastWord === "to") return "be";
+  if (lastWord === "and") return "then";
+  if (lastWord === "in") return "the";
+  if (lastWord === "of") return "the";
+  if (lastWord === "with") return "the";
+  
+  // Default fallback is to repeat the last word + ellipsis
+  return `${lastWord}...`;
 }
 
 export async function POST(request: Request) {
-  // Add response headers for longer cache and connection timeout
+  // Track processing time
+  const startTime = Date.now();
+  
+  // Add response headers for better connection management
   const responseHeaders = new Headers({
     'Connection': 'keep-alive',
-    'Keep-Alive': 'timeout=30', // 30 seconds keep-alive
+    'Keep-Alive': 'timeout=25', // 25 seconds keep-alive
+    'Cache-Control': 'no-store, private',
+    'Content-Type': 'application/json',
   });
 
-  // Check if DeepSeek API key is set
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  
-  if (!apiKey) {
-    console.error("DeepSeek API key not found in environment variables");
-    return NextResponse.json(
-      { error: "DeepSeek API key not configured" },
-      { status: 400, headers: responseHeaders }
-    );
-  }
-
   try {
-    // Initialize DeepSeek client (using OpenAI compatibility)
-    const deepseek = new OpenAI({
-      apiKey,
-      baseURL: "https://api.deepseek.com/v1",
-      timeout: API_TIMEOUT, // Set timeout for fetch requests
-      maxRetries: 1, // Limit retries to avoid excessive timeouts
-    });
+    // Parse the request early to fail fast if malformed
+    let text: string;
+    let maxTokens: number = 15; // Reduced from 100 to 15
+    let temperature: number = 0.7;
     
-    // Parse the request body
-    const { text, maxTokens = 100, temperature = 0.7 } = await request.json();
-    
-    if (!text) {
+    try {
+      const body = await request.json();
+      text = body.text || '';
+      maxTokens = body.maxTokens || maxTokens;
+      temperature = body.temperature || temperature;
+      
+      if (!text) {
+        return NextResponse.json(
+          { error: "Text is required", suggestion: "" },
+          { status: 400, headers: responseHeaders }
+        );
+      }
+    } catch (parseError) {
+      console.error("Failed to parse request body:", parseError);
       return NextResponse.json(
-        { error: "Text is required" },
+        { error: "Invalid request format", suggestion: "" },
         { status: 400, headers: responseHeaders }
       );
     }
-
-    // Create the prompt - use a very short context to reduce response time
-    const lastChars = text.slice(-100); // Get just the last 100 characters for faster processing
-    const prompt = `
-      Based on this text fragment, suggest a 2-3 word continuation:
-      "${lastChars}"
-      
-      Suggestion:
-    `.trim();
-
-    // Start a timer to track total processing time
-    const startTime = Date.now();
     
-    try {
-      // Use a Promise.race to implement timeout
-      const completionPromise = deepseek.chat.completions.create({
-        model: "deepseek-chat",
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: Math.min(maxTokens, 20), // Limit max tokens to ensure faster response
-        temperature: temperature,
-      });
-      
-      // Create a timeout promise
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('DeepSeek API request timed out')), API_TIMEOUT);
-      });
-      
-      // Race the completion against the timeout
-      const completion = await Promise.race([
-        completionPromise,
-        timeoutPromise,
-      ]) as OpenAI.Chat.Completions.ChatCompletion;
-      
-      const suggestion = completion.choices[0]?.message.content?.trim() || "";
-      
-      // Calculate total processing time
-      const processingTime = Date.now() - startTime;
-      console.log(`Suggestion generated in ${processingTime}ms`);
-      
+    // Limit to just the last 50 characters for extremely fast processing
+    const lastChars = text.slice(-50); 
+    
+    // Check if DeepSeek API key is set
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    
+    // If no API key, just use the local fallback immediately
+    if (!apiKey) {
+      console.warn("DeepSeek API key not found, using local fallback");
+      const fallbackSuggestion = generateSimpleFallback(lastChars);
       return NextResponse.json({ 
-        suggestion,
-        processingTime 
+        suggestion: fallbackSuggestion,
+        fallback: true,
+        processingTime: Date.now() - startTime
       }, { 
         headers: responseHeaders 
       });
-    } catch (innerError: any) {
-      // Handle specific DeepSeek errors
-      console.error("DeepSeek API error:", innerError);
+    }
+
+    // Use a simplified prompt for faster processing
+    const prompt = `Continue this text: "${lastChars}"`;
+    
+    try {
+      // Initialize DeepSeek client with tight timeout
+      const deepseek = new OpenAI({
+        apiKey,
+        baseURL: "https://api.deepseek.com/v1",
+        timeout: API_TIMEOUT,
+        maxRetries: 0, // No retries at SDK level, we handle them ourselves
+      });
       
-      if (innerError.message === 'DeepSeek API request timed out') {
-        return NextResponse.json(
-          { error: "DeepSeek API request timed out", code: 'timeout_error' },
-          { status: 504, headers: responseHeaders }
-        );
-      } else if (innerError.status === 401 || innerError.message?.includes('Authentication')) {
-        // Instead of failing, try an extremely simple fallback approach
-        console.log("Authentication error with DeepSeek, using fallback generation");
+      // Create an AbortController for the timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+      
+      // Create a Promise that resolves to either the API response or a timeout/error
+      const completionPromise = Promise.race([
+        // DeepSeek API call
+        deepseek.chat.completions.create({
+          model: "deepseek-chat",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: Math.min(maxTokens, 10), // Limit to 10 tokens max
+          temperature: temperature,
+        }),
         
-        // Extremely simple fallback suggestion
-        const words = lastChars.split(/\s+/);
-        const lastTwoWords = words.slice(-2).join(' ');
-        const fallbackSuggestion = lastTwoWords || "and then";
+        // Timeout promise that triggers if the API takes too long
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('API request timed out')), API_TIMEOUT);
+        })
+      ]).catch(error => {
+        // If API call fails for any reason, use the local fallback
+        clearTimeout(timeoutId);
+        console.warn("DeepSeek API error, using fallback:", error.message || "Unknown error");
+        return null;
+      }).finally(() => {
+        clearTimeout(timeoutId);
+      });
+      
+      // Wait for the API response or timeout
+      const completion = await completionPromise as OpenAI.Chat.Completions.ChatCompletion | null;
+      
+      // If we got a valid response, return it
+      if (completion) {
+        const suggestion = completion.choices[0]?.message.content?.trim() || "";
+        
+        // Calculate total processing time
+        const processingTime = Date.now() - startTime;
+        console.log(`Suggestion generated in ${processingTime}ms`);
         
         return NextResponse.json({ 
-          suggestion: fallbackSuggestion,
-          fallback: true
+          suggestion,
+          processingTime 
         }, { 
           headers: responseHeaders 
         });
       }
       
-      throw innerError; // Re-throw for the outer catch
+      // If we reach here, the API call failed and we need to use local fallback
+      const fallbackSuggestion = generateSimpleFallback(lastChars);
+      return NextResponse.json({ 
+        suggestion: fallbackSuggestion,
+        fallback: true,
+        processingTime: Date.now() - startTime
+      }, { 
+        headers: responseHeaders 
+      });
+    } catch (apiError: any) {
+      // Handle any unexpected errors from the DeepSeek API call
+      console.error("DeepSeek API unexpected error:", apiError);
+      
+      // Use local fallback for any API errors
+      const fallbackSuggestion = generateSimpleFallback(lastChars);
+      return NextResponse.json({ 
+        suggestion: fallbackSuggestion,
+        fallback: true,
+        error: apiError.message || "API error",
+        processingTime: Date.now() - startTime
+      }, { 
+        headers: responseHeaders 
+      });
     }
   } catch (error: any) {
-    console.error("Error generating suggestion:", error);
+    // Handle any other unexpected errors
+    console.error("Unexpected error generating suggestion:", error);
     
-    // Provide a more helpful error message
-    let statusCode = 500;
-    let errorMessage = "Failed to generate suggestion";
-    
-    if (error.message === 'DeepSeek API request timed out') {
-      statusCode = 504;
-      errorMessage = "Request to DeepSeek API timed out. Please try again.";
-    } else if (error.status === 401 || error.message?.includes('Authentication')) {
-      statusCode = 401;
-      errorMessage = "Authentication failed with DeepSeek API. Please check your API key.";
-    } else if (error.message?.includes('aborted') || error.message?.includes('canceled')) {
-      statusCode = 499; // Client closed request
-      errorMessage = "Request was canceled.";
-    }
-    
-    return NextResponse.json(
-      { 
-        error: errorMessage,
-        code: statusCode,
-        message: error.message || "Unknown error"
-      },
-      { status: statusCode, headers: responseHeaders }
-    );
+    // Always return a 200 response with a fallback suggestion
+    // This prevents the client from seeing errors
+    return NextResponse.json({ 
+      suggestion: "and then",
+      fallback: true,
+      error: error.message || "Unknown error",
+      processingTime: Date.now() - startTime
+    }, { 
+      status: 200, // Always return 200 to avoid client-side errors
+      headers: responseHeaders 
+    });
   }
 } 

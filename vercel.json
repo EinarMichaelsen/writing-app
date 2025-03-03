@@ -2,7 +2,7 @@
   "version": 2,
   "functions": {
     "api/**/*.ts": {
-      "maxDuration": 60
+      "maxDuration": 30
     }
   },
   "headers": [
@@ -16,8 +16,18 @@
         {
           "key": "Connection",
           "value": "keep-alive"
+        },
+        {
+          "key": "Keep-Alive",
+          "value": "timeout=25"
+        },
+        {
+          "key": "Content-Type",
+          "value": "application/json; charset=utf-8"
         }
       ]
     }
-  ]
+  ],
+  "regions": ["iad1"],
+  "edgeConnectTimeout": 15000
 } 
