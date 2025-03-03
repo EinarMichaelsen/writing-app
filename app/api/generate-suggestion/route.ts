@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
+// Set a reasonable timeout for the DeepSeek API call
+const API_TIMEOUT = 25000; // 25 seconds
+
 export async function POST(request: Request) {
   // Check if DeepSeek API key is set
   const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -17,6 +20,7 @@ export async function POST(request: Request) {
     const deepseek = new OpenAI({
       apiKey,
       baseURL: "https://api.deepseek.com/v1",
+      timeout: API_TIMEOUT, // Set timeout for fetch requests
     });
     
     // Parse the request body
@@ -29,33 +33,56 @@ export async function POST(request: Request) {
       );
     }
 
-    // Create the prompt
-    const lastChars = text.slice(-300); // Get the last 300 characters for context
+    // Create the prompt - use a shorter context to reduce response time
+    const lastChars = text.slice(-200); // Get just the last 200 characters for faster processing
     const prompt = `
-      Based on the following text, suggest a brief, contextually relevant continuation that helps the writer overcome writer's block. Keep it concise, relevant, and creative.
+      Based on the following text, suggest a brief continuation (2-5 words):
       
       Text: "${lastChars}"
       
       Suggested continuation:
     `;
 
-    // Generate a suggestion using the DeepSeek API
-    const completion = await deepseek.chat.completions.create({
+    // Create a promise that will reject after the timeout
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('DeepSeek API request timed out')), API_TIMEOUT);
+    });
+
+    // Race the API request against the timeout
+    const completionPromise = deepseek.chat.completions.create({
       model: "deepseek-chat",
       messages: [{ role: "user", content: prompt }],
-      max_tokens: maxTokens,
+      max_tokens: Math.min(maxTokens, 50), // Limit max tokens to ensure faster response
       temperature: temperature,
     });
 
-    const suggestion = completion.choices[0]?.message.content || "";
+    // Wait for either the completion or the timeout
+    const completion = await Promise.race([
+      completionPromise,
+      timeoutPromise,
+    ]) as OpenAI.Chat.Completions.ChatCompletion;
+
+    const suggestion = completion.choices[0]?.message.content?.trim() || "";
 
     return NextResponse.json({ suggestion });
   } catch (error: any) {
     console.error("Error generating suggestion:", error);
     
+    // Provide a more helpful error message
+    let statusCode = 500;
+    let errorMessage = "Failed to generate suggestion";
+    
+    if (error.message === 'DeepSeek API request timed out') {
+      statusCode = 504;
+      errorMessage = "Request to DeepSeek API timed out. Please try again.";
+    } else if (error.status === 401) {
+      statusCode = 401;
+      errorMessage = "Authentication failed with DeepSeek API. Please check your API key.";
+    }
+    
     return NextResponse.json(
-      { error: error.message || "Failed to generate suggestion" },
-      { status: 500 }
+      { error: errorMessage },
+      { status: statusCode }
     );
   }
 } 

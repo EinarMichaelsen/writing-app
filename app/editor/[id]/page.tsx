@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ArrowLeft, ChevronRight, Clock, Edit3, Hash, MessageSquare, Save, Settings, ChevronLeft } from "lucide-react"
+import { ArrowLeft, ChevronRight, Clock, Edit3, Hash, MessageSquare, Save, Settings, ChevronLeft, AlertCircle } from "lucide-react"
 import { EditorContent } from "@/components/editor-content"
 import { ChatInterface } from "@/components/chat-interface"
 import { SourcesPanel } from "@/components/sources-panel"
 import { VersionHistory } from "@/components/version-history"
 import { generateSuggestion, isDeepSeekConfigured } from "@/lib/deepseek-config"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 export default function EditorPage({ params }: { params: { id: string } }) {
   const [title, setTitle] = useState("Untitled Document")
@@ -21,23 +22,37 @@ export default function EditorPage({ params }: { params: { id: string } }) {
   const [isGenerating, setIsGenerating] = useState(false)
   const [suggestion, setSuggestion] = useState("")
   const [apiConfigured, setApiConfigured] = useState(true) // Assume true initially
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [consecutiveErrors, setConsecutiveErrors] = useState(0)
   const editorRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
   // Check if DeepSeek API is configured
   useEffect(() => {
     async function checkApiConfig() {
-      const isConfigured = await isDeepSeekConfigured();
-      setApiConfigured(isConfigured);
+      try {
+        const isConfigured = await isDeepSeekConfigured();
+        setApiConfigured(isConfigured);
+        if (isConfigured) {
+          setErrorMessage(null);
+        } else {
+          setErrorMessage("DeepSeek API not configured. Add your API key to .env.local");
+        }
+      } catch (error) {
+        console.error("Error checking API configuration:", error);
+        setErrorMessage("Could not verify API configuration");
+      }
     }
     
     checkApiConfig();
+    
+    // Recheck API configuration every 60 seconds
+    const interval = setInterval(checkApiConfig, 60000);
+    return () => clearInterval(interval);
   }, []);
 
   // Handle content changes
   const handleContentChange = (newContent: string) => {
-    // Ensure we're getting the content in the correct order
-    console.log('New content:', newContent) // Add this debug log
     setContent(newContent)
   }
 
@@ -59,24 +74,24 @@ export default function EditorPage({ params }: { params: { id: string } }) {
   // Generate next word suggestion when content changes
   useEffect(() => {
     // Only generate suggestions if API is configured
-    if (!apiConfigured) return;
+    if (!apiConfigured || errorMessage) return;
     
     // Only generate suggestions after a short delay since the last keystroke
     let debounceTimeout: NodeJS.Timeout;
     
-    if (content && isEditing) {
+    if (content && isEditing && consecutiveErrors < 3) {
       debounceTimeout = setTimeout(() => {
         generateNextSuggestion(content);
-      }, 500); // 500ms delay
+      }, 800); // Increased to 800ms for less frequent API calls
     }
     
     return () => {
       if (debounceTimeout) clearTimeout(debounceTimeout);
     };
-  }, [content, isEditing, apiConfigured]);
+  }, [content, isEditing, apiConfigured, errorMessage, consecutiveErrors]);
 
   const generateNextSuggestion = async (currentContent: string) => {
-    if (!currentContent || isGenerating || !apiConfigured) return;
+    if (!currentContent || isGenerating || !apiConfigured || errorMessage) return;
 
     setIsGenerating(true);
     try {
@@ -87,9 +102,34 @@ export default function EditorPage({ params }: { params: { id: string } }) {
       });
       
       setSuggestion(suggestion);
-    } catch (error) {
+      // Reset consecutive errors on success
+      if (consecutiveErrors > 0) {
+        setConsecutiveErrors(0);
+        setErrorMessage(null);
+      }
+    } catch (error: any) {
       console.error("Error generating suggestion:", error);
       setSuggestion("");
+      
+      // Track consecutive errors
+      setConsecutiveErrors(prev => prev + 1);
+      
+      // Set appropriate error message
+      if (error.message?.includes('timed out')) {
+        setErrorMessage("API request timed out. Trying again later.");
+      } else if (error.message?.includes('Authentication')) {
+        setErrorMessage("API authentication failed. Check your API key.");
+      } else {
+        setErrorMessage("Error generating suggestions. Will retry soon.");
+      }
+      
+      // After 3 consecutive errors, temporarily disable suggestions for 30 seconds
+      if (consecutiveErrors >= 2) {
+        setTimeout(() => {
+          setConsecutiveErrors(0);
+          setErrorMessage(null);
+        }, 30000);
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -148,6 +188,18 @@ export default function EditorPage({ params }: { params: { id: string } }) {
                   <p className="font-medium">DeepSeek API not configured</p>
                   <p>The text completion API is not properly configured. Add your DeepSeek API key to the .env.local file to enable suggestions.</p>
                 </div>
+              )}
+              
+              {/* Error message */}
+              {errorMessage && isEditing && (
+                <Alert variant="destructive" className="mt-4">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Suggestion Service Issue</AlertTitle>
+                  <AlertDescription>
+                    {errorMessage}
+                    {consecutiveErrors >= 3 && " Suggestions paused temporarily."}
+                  </AlertDescription>
+                </Alert>
               )}
             </div>
           </div>
