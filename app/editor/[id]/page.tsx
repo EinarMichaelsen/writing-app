@@ -10,7 +10,7 @@ import { EditorContent } from "@/components/editor-content"
 import { ChatInterface } from "@/components/chat-interface"
 import { SourcesPanel } from "@/components/sources-panel"
 import { VersionHistory } from "@/components/version-history"
-import { generateSuggestion, isOpenAIConfigured } from "@/lib/openai-config"
+import { generateSuggestion, isDeepSeekConfigured } from "@/lib/deepseek-config"
 
 export default function EditorPage({ params }: { params: { id: string } }) {
   const [title, setTitle] = useState("Untitled Document")
@@ -24,10 +24,10 @@ export default function EditorPage({ params }: { params: { id: string } }) {
   const editorRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
-  // Check if OpenAI API is configured
+  // Check if DeepSeek API is configured
   useEffect(() => {
     async function checkApiConfig() {
-      const isConfigured = await isOpenAIConfigured();
+      const isConfigured = await isDeepSeekConfigured();
       setApiConfigured(isConfigured);
     }
     
@@ -82,7 +82,7 @@ export default function EditorPage({ params }: { params: { id: string } }) {
     try {
       // Use our server-side API endpoint for suggestion generation
       const suggestion = await generateSuggestion(currentContent, {
-        maxLength: 15,
+        maxTokens: 15,
         temperature: 0.4,
       });
       
@@ -100,92 +100,121 @@ export default function EditorPage({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="flex flex-col h-screen">
-      {/* Header */}
-      <header className="flex items-center justify-between px-4 py-2 border-b">
+    <div className="flex flex-col h-screen overflow-hidden">
+      {/* Header with navigation and document title */}
+      <header className="border-b px-4 py-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => router.push("/")}>
-            <ArrowLeft className="w-4 h-4" />
+          <Button variant="ghost" size="icon" onClick={() => router.push("/dashboard")}>
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div className="flex items-center gap-2">
-            <Edit3 className="w-5 h-5" />
+          
+          {isEditing ? (
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="h-9 font-medium border-none focus-visible:ring-0 focus-visible:ring-offset-0"
+              className="text-lg font-medium h-9 max-w-md focus-visible:ring-0"
             />
-          </div>
+          ) : (
+            <h1 className="text-lg font-medium">{title}</h1>
+          )}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            <Save className="w-4 h-4 mr-2" />
-            Save
+          <Button variant="outline" size="sm" onClick={() => setIsEditing(!isEditing)}>
+            {isEditing ? "View" : "Edit"}
           </Button>
-          <Button variant="ghost" size="icon">
-            <Settings className="w-4 h-4" />
+          <Button variant="outline" size="sm">
+            <Save className="h-4 w-4 mr-2" />
+            Save
           </Button>
         </div>
       </header>
 
-      {/* Main content */}
+      {/* Main content area with editor and sidebar */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Editor area */}
-        <div className="flex-1 overflow-hidden">
-          <div className="relative h-full">
-            <EditorContent content={content} suggestion={suggestion} onChange={handleContentChange} ref={editorRef} />
+        {/* Editor pane */}
+        <div className="flex-1 overflow-auto p-4">
+          <div className="max-w-3xl mx-auto">
+            <div ref={editorRef} className="relative">
+              {/* Editor content */}
+              <EditorContent
+                content={content}
+                suggestion={suggestion}
+                onChange={handleContentChange}
+              />
+              
+              {/* API configuration warning */}
+              {!apiConfigured && isEditing && (
+                <div className="my-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md text-yellow-800 text-sm">
+                  <p className="font-medium">DeepSeek API not configured</p>
+                  <p>The text completion API is not properly configured. Add your DeepSeek API key to the .env.local file to enable suggestions.</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Sidebar */}
         {showSidebar && (
-          <div className="w-80 border-l bg-background">
+          <div className="w-80 border-l overflow-hidden flex flex-col">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-              <div className="border-b">
-                <TabsList className="w-full justify-start rounded-none border-b px-2 h-12">
-                  <TabsTrigger value="chat" className="data-[state=active]:bg-muted">
-                    <MessageSquare className="w-4 h-4 mr-2" />
-                    Chat
-                  </TabsTrigger>
-                  <TabsTrigger value="versions" className="data-[state=active]:bg-muted">
-                    <Clock className="w-4 h-4 mr-2" />
-                    Versions
-                  </TabsTrigger>
-                  <TabsTrigger value="sources" className="data-[state=active]:bg-muted">
-                    <Hash className="w-4 h-4 mr-2" />
-                    Sources
-                  </TabsTrigger>
-                </TabsList>
-              </div>
+              <TabsList className="w-full justify-start px-3 pt-3 border-b rounded-none">
+                <TabsTrigger value="chat" className="flex items-center gap-1 data-[state=active]:bg-background">
+                  <MessageSquare className="h-4 w-4" />
+                  <span>Chat</span>
+                </TabsTrigger>
+                <TabsTrigger value="sources" className="flex items-center gap-1 data-[state=active]:bg-background">
+                  <Hash className="h-4 w-4" />
+                  <span>Sources</span>
+                </TabsTrigger>
+                <TabsTrigger value="history" className="flex items-center gap-1 data-[state=active]:bg-background">
+                  <Clock className="h-4 w-4" />
+                  <span>History</span>
+                </TabsTrigger>
+                <TabsTrigger value="settings" className="flex items-center gap-1 data-[state=active]:bg-background">
+                  <Settings className="h-4 w-4" />
+                  <span>Settings</span>
+                </TabsTrigger>
+              </TabsList>
 
-              <TabsContent value="chat" className="flex-1 p-0 m-0 overflow-hidden">
-                <ChatInterface documentContent={content} onInsertText={(text) => setContent(content + text)} />
+              <TabsContent value="chat" className="flex-1 p-0 h-full overflow-auto">
+                <ChatInterface 
+                  documentContent={content} 
+                  onInsertText={(text) => setContent(content + text)} 
+                />
               </TabsContent>
-
-              <TabsContent value="versions" className="flex-1 p-0 m-0 overflow-hidden">
-                <VersionHistory
+              
+              <TabsContent value="sources" className="flex-1 p-0 h-full overflow-auto">
+                <SourcesPanel 
+                  documentId={params.id}
+                  onInsertReference={(reference) => setContent(content + reference)}
+                />
+              </TabsContent>
+              
+              <TabsContent value="history" className="flex-1 p-0 h-full overflow-auto">
+                <VersionHistory 
                   documentId={params.id}
                   onSelectVersion={(versionContent) => setContent(versionContent)}
                 />
               </TabsContent>
-
-              <TabsContent value="sources" className="flex-1 p-0 m-0 overflow-hidden">
-                <SourcesPanel
-                  documentId={params.id}
-                  onInsertReference={(reference) => setContent(content + reference)}
-                />
+              
+              <TabsContent value="settings" className="h-full overflow-auto">
+                <div className="p-4">
+                  <h3 className="text-lg font-medium mb-4">Editor Settings</h3>
+                  {/* Add settings here */}
+                </div>
               </TabsContent>
             </Tabs>
           </div>
         )}
 
-        {/* Sidebar toggle */}
+        {/* Sidebar toggle button */}
         <Button
           variant="ghost"
           size="icon"
-          className="absolute right-0 top-1/2 transform -translate-y-1/2 z-10"
+          className="absolute right-0 top-1/2 -translate-y-1/2 z-10"
           onClick={toggleSidebar}
         >
-          {showSidebar ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+          {showSidebar ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
         </Button>
       </div>
     </div>

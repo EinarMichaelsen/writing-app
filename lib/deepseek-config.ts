@@ -27,7 +27,11 @@ export function getDeepSeekClient(): OpenAI {
  */
 export async function isDeepSeekConfigured(): Promise<boolean> {
   try {
-    const response = await fetch("/api/test-deepseek");
+    // Use relative URL for API calls to ensure they work in all environments
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const url = `${baseUrl}/api/test-deepseek`;
+    
+    const response = await fetch(url);
     if (!response.ok) return false;
     const data = await response.json();
     return data.configured;
@@ -45,7 +49,11 @@ export async function generateSuggestion(
   options: DeepSeekOptions = {}
 ): Promise<string> {
   try {
-    const response = await fetch("/api/generate-suggestion", {
+    // Use relative URL for API calls to ensure they work in all environments
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const url = `${baseUrl}/api/generate-suggestion`;
+    
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

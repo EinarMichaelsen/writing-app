@@ -1,4 +1,1 @@
-{
-  "/editor/[id]/page": "app/editor/[id]/page.js",
-  "/api/test-openai/route": "app/api/test-openai/route.js"
-}
+{}
