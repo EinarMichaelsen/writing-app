@@ -8,8 +8,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ArrowUp } from "lucide-react"
-import { streamText } from "ai"
-import { getOpenAIModel } from "@/lib/openai-config"
 
 interface ChatMessage {
   role: "user" | "assistant"
@@ -25,32 +23,32 @@ export function ChatInterface({ documentContent, onInsertText }: ChatInterfacePr
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
-      content: "Hi! I'm your writing assistant. How can I help you with your document today?",
-    },
+      content: "Hello! I'm your AI writing assistant. How can I help you with your document today?"
+    }
   ])
   const [input, setInput] = useState("")
   const [isStreaming, setIsStreaming] = useState(false)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
 
-  // Scroll to bottom when messages change
   useEffect(() => {
+    // Scroll to bottom when messages change
     if (scrollAreaRef.current) {
       scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight
     }
-  }, [messages]) //Corrected dependency
+  }, [messages])
 
   const handleSendMessage = async () => {
     if (!input.trim() || isStreaming) return
 
     const userMessage = input.trim()
     setInput("")
-
-    // Add user message to chat
+    
+    // Add user message
     setMessages((prev) => [...prev, { role: "user", content: userMessage }])
-
-    // Add empty assistant message that will be filled with the stream
+    
+    // Add empty assistant message that will be filled with the streamed response
     setMessages((prev) => [...prev, { role: "assistant", content: "" }])
-
+    
     setIsStreaming(true)
 
     try {
@@ -59,29 +57,42 @@ export function ChatInterface({ documentContent, onInsertText }: ChatInterfacePr
         ? `The current document content is: "${documentContent.substring(0, 1000)}${documentContent.length > 1000 ? "..." : ""}"`
         : "The document is currently empty."
 
-      // Stream the response
-      const result = streamText({
-        model: getOpenAIModel("gpt-4o"),
-        system: `You are an AI writing assistant helping a user with their document. 
-                Be concise, helpful, and focus on improving the user's writing. 
-                Provide specific suggestions when asked.
-                ${context}`,
-        prompt: userMessage,
-        onChunk: ({ chunk }) => {
-          if (chunk.type === "text-delta") {
-            setMessages((prev) => {
-              const newMessages = [...prev]
-              const lastMessage = newMessages[newMessages.length - 1]
-              if (lastMessage.role === "assistant") {
-                lastMessage.content += chunk.textDelta
-              }
-              return newMessages
-            })
-          }
+      // Stream response using fetch
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-      })
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: userMessage }],
+          context,
+        }),
+      });
 
-      await result
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('Response body is not readable');
+
+      // Read the stream
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        // Decode the chunk and append to message
+        const text = new TextDecoder().decode(value);
+        
+        setMessages((prev) => {
+          const newMessages = [...prev];
+          const lastMessage = newMessages[newMessages.length - 1];
+          if (lastMessage.role === 'assistant') {
+            lastMessage.content += text;
+          }
+          return newMessages;
+        });
+      }
     } catch (error) {
       console.error("Error streaming response:", error)
       setMessages((prev) => {

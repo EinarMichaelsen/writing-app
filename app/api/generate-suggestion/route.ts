@@ -1,50 +1,61 @@
 import { NextResponse } from 'next/server';
-import { generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import OpenAI from 'openai';
 
 export async function POST(request: Request) {
+  // Check if DeepSeek API key is set
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "DeepSeek API key not found" },
+      { status: 400 }
+    );
+  }
+
   try {
-    // Check if API key exists
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json({ 
-        success: false, 
-        message: "OpenAI API key is missing in environment variables",
-      }, { status: 500 });
-    }
+    // Initialize DeepSeek client (using OpenAI compatibility)
+    const deepseek = new OpenAI({
+      apiKey,
+      baseURL: "https://api.deepseek.com/v1",
+    });
     
-    // Parse request body
-    const body = await request.json();
-    const { text, maxTokens = 15, temperature = 0.4 } = body;
+    // Parse the request body
+    const { text, maxTokens = 100, temperature = 0.7 } = await request.json();
     
     if (!text) {
-      return NextResponse.json({ 
-        success: false, 
-        message: "Text input is required",
-      }, { status: 400 });
+      return NextResponse.json(
+        { error: "Text is required" },
+        { status: 400 }
+      );
     }
-    
-    // Generate suggestion using OpenAI
-    const { text: suggestion } = await generateText({
-      model: openai("gpt-4o"),
-      prompt: `You are an intelligent autocomplete system. Complete the following text with a natural suggestion that would help the writer continue their document. Your suggestion should be brief (2-10 words) and contextually relevant. Only provide the completion text without any explanation or additional content.
+
+    // Create the prompt
+    const lastChars = text.slice(-300); // Get the last 300 characters for context
+    const prompt = `
+      Based on the following text, suggest a brief, contextually relevant continuation that helps the writer overcome writer's block. Keep it concise, relevant, and creative.
       
-Document so far:
-${text.slice(-300)}`,
-      maxTokens,
-      temperature,
+      Text: "${lastChars}"
+      
+      Suggested continuation:
+    `;
+
+    // Generate a suggestion using the DeepSeek API
+    const completion = await deepseek.chat.completions.create({
+      model: "deepseek-chat",
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: maxTokens,
+      temperature: temperature,
     });
+
+    const suggestion = completion.choices[0]?.message.content || "";
+
+    return NextResponse.json({ suggestion });
+  } catch (error: any) {
+    console.error("Error generating suggestion:", error);
     
-    // Return the cleaned suggestion
-    return NextResponse.json({ 
-      success: true, 
-      suggestion: suggestion.trim(),
-    });
-  } catch (error) {
-    console.error('OpenAI API error:', error);
-    return NextResponse.json({ 
-      success: false, 
-      message: "Error generating suggestion",
-      error: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || "Failed to generate suggestion" },
+      { status: 500 }
+    );
   }
 } 
