@@ -4,6 +4,8 @@ import OpenAI from "openai";
 interface DeepSeekOptions {
   maxTokens?: number;
   temperature?: number;
+  maxRetries?: number;
+  timeout?: number;
 }
 
 /**

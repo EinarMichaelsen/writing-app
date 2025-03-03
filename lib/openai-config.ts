@@ -32,30 +32,67 @@ export async function isOpenAIConfigured(): Promise<boolean> {
  */
 export async function generateSuggestion(
   text: string, 
-  options?: { maxTokens?: number; temperature?: number }
+  options?: { maxTokens?: number; temperature?: number; maxRetries?: number; timeout?: number }
 ): Promise<string> {
-  try {
-    const response = await fetch('/api/generate-suggestion', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        text,
-        maxTokens: options?.maxTokens,
-        temperature: options?.temperature,
-      }),
-    });
-
-    const data = await response.json();
+  const maxRetries = options?.maxRetries || 2;
+  const timeout = options?.timeout || 20000; // 20 seconds default timeout
+  
+  // Create a function for a single attempt
+  const attemptRequest = async (attempt: number): Promise<string> => {
+    // Create an AbortController for this attempt
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
     
-    if (!response.ok) {
-      throw new Error(data.error || 'Failed to generate suggestion');
-    }
+    try {
+      console.log(`Making suggestion request (attempt ${attempt}/${maxRetries})`);
+      
+      const response = await fetch('/api/generate-suggestion', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text,
+          maxTokens: options?.maxTokens,
+          temperature: options?.temperature,
+        }),
+        signal: controller.signal,
+      });
 
-    return data.suggestion;
-  } catch (error) {
-    console.error('Error generating suggestion:', error);
-    throw error;
-  }
+      // Clear the timeout
+      clearTimeout(timeoutId);
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || `Failed to generate suggestion: ${response.status}`);
+      }
+
+      return data.suggestion;
+    } catch (error: any) {
+      // Clear the timeout to prevent memory leaks
+      clearTimeout(timeoutId);
+      
+      console.error(`Attempt ${attempt} failed:`, error);
+      
+      if (error.name === 'AbortError') {
+        throw new Error('Request timed out');
+      }
+      
+      // If we have retries left, don't throw yet
+      if (attempt < maxRetries) {
+        console.log(`Retrying... (${attempt}/${maxRetries})`);
+        // Wait a bit before retrying (exponential backoff)
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return attemptRequest(attempt + 1);
+      }
+      
+      // No more retries, propagate the error
+      throw error;
+    }
+  };
+  
+  // Start with the first attempt
+  return attemptRequest(1);
 } 

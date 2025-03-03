@@ -2,7 +2,7 @@
   "version": 2,
   "functions": {
     "api/**/*.ts": {
-      "maxDuration": 30
+      "maxDuration": 60
     }
   },
   "headers": [
@@ -12,6 +12,10 @@
         {
           "key": "Cache-Control",
           "value": "no-store, max-age=0"
+        },
+        {
+          "key": "Connection",
+          "value": "keep-alive"
         }
       ]
     }

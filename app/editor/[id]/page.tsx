@@ -99,6 +99,8 @@ export default function EditorPage({ params }: { params: { id: string } }) {
       const suggestion = await generateSuggestion(currentContent, {
         maxTokens: 15,
         temperature: 0.4,
+        maxRetries: 2,
+        timeout: 12000, // 12 second client-side timeout (shorter than server to avoid race conditions)
       });
       
       setSuggestion(suggestion);
@@ -115,22 +117,35 @@ export default function EditorPage({ params }: { params: { id: string } }) {
       setConsecutiveErrors(prev => prev + 1);
       
       // Set appropriate error message
-      if (error.message?.includes('timed out')) {
-        setErrorMessage("API request timed out. Trying again later.");
+      if (error.message?.includes('timed out') || error.message?.includes('504')) {
+        // For timeout errors, silently retry without showing error to user until consecutive errors
+        if (consecutiveErrors >= 2) {
+          setErrorMessage("API requests timing out. Will resume shortly.");
+        }
       } else if (error.message?.includes('Authentication')) {
-        setErrorMessage("API authentication failed. Check your API key.");
+        // For auth errors, try to continue without showing error unless repeatedly failing
+        if (consecutiveErrors >= 1) {
+          setErrorMessage("Check your DeepSeek API key in environment variables.");
+        }
       } else {
-        setErrorMessage("Error generating suggestions. Will retry soon.");
+        // Generic message for other errors
+        const shortError = error.message?.substring(0, 50) || "Unknown error";
+        setErrorMessage(`Error: ${shortError}. Will retry soon.`);
       }
       
-      // After 3 consecutive errors, temporarily disable suggestions for 30 seconds
+      // After 3 consecutive errors, temporarily disable suggestions for 60 seconds
       if (consecutiveErrors >= 2) {
+        const backoffTime = 60000; // 60 seconds
+        console.log(`Too many errors (${consecutiveErrors}). Backing off for ${backoffTime/1000}s`);
+        
         setTimeout(() => {
           setConsecutiveErrors(0);
           setErrorMessage(null);
-        }, 30000);
+          console.log("Resuming suggestions after backoff period");
+        }, backoffTime);
       }
     } finally {
+      // Always reset generating state
       setIsGenerating(false);
     }
   };
