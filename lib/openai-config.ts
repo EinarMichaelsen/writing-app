@@ -1,17 +1,18 @@
 import { openai } from '@ai-sdk/openai';
 
-// Initialize OpenAI with API key from environment variables
-export const getOpenAIModel = (model: string) => {
-  // For client-side usage, we need to check that we're accessing the API correctly
-  // This ensures the OpenAI key is only used on the server or via API routes
-  if (typeof window !== 'undefined' && !model.startsWith('openai:')) {
-    return `openai:${model}`;
-  }
-  
-  return model;
-};
+/**
+ * Get configured OpenAI model for client-side usage
+ * @param modelName The name of the OpenAI model to use
+ * @returns The configured OpenAI model
+ */
+export function getOpenAIModel(modelName: string) {
+  return openai(modelName);
+}
 
-// Function to check if OpenAI API key is configured
+/**
+ * Check if OpenAI API key is configured
+ * @returns Promise resolving to boolean indicating if OpenAI is configured
+ */
 export async function isOpenAIConfigured(): Promise<boolean> {
   try {
     const response = await fetch('/api/test-openai');
@@ -23,14 +24,16 @@ export async function isOpenAIConfigured(): Promise<boolean> {
   }
 }
 
-// Helper for generating suggestions with properly configured context
+/**
+ * Generate a suggestion using OpenAI API
+ * @param text The current text to generate a suggestion for
+ * @param options Optional parameters for the suggestion
+ * @returns The generated suggestion
+ */
 export async function generateSuggestion(
   text: string, 
-  options?: { maxLength?: number; temperature?: number }
-) {
-  const maxLength = options?.maxLength || 15;
-  const temperature = options?.temperature || 0.4;
-  
+  options?: { maxTokens?: number; temperature?: number }
+): Promise<string> {
   try {
     const response = await fetch('/api/generate-suggestion', {
       method: 'POST',
@@ -39,19 +42,20 @@ export async function generateSuggestion(
       },
       body: JSON.stringify({
         text,
-        maxTokens: maxLength,
-        temperature,
+        maxTokens: options?.maxTokens,
+        temperature: options?.temperature,
       }),
     });
+
+    const data = await response.json();
     
     if (!response.ok) {
-      throw new Error('Failed to generate suggestion');
+      throw new Error(data.error || 'Failed to generate suggestion');
     }
-    
-    const data = await response.json();
+
     return data.suggestion;
   } catch (error) {
     console.error('Error generating suggestion:', error);
-    return '';
+    throw error;
   }
 } 

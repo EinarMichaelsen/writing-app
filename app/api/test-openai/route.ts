@@ -1,4 +1,5 @@
-import { OpenAI } from '@ai-sdk/openai';
+import { openai } from '@ai-sdk/openai';
+import { generateText } from 'ai';
 import { NextResponse } from 'next/server';
 
 export async function GET() {
@@ -11,26 +12,32 @@ export async function GET() {
       }, { status: 500 });
     }
     
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-    
-    // Simple test completion
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [{ role: "user", content: "Hello, are you working?" }],
-    });
-    
-    return NextResponse.json({ 
-      success: true, 
-      message: "API key is working correctly",
-      response: completion.choices[0].message.content
-    });
+    // Test the API key with a simple completion
+    try {
+      const { text } = await generateText({
+        model: openai("gpt-4o"),
+        prompt: "Hello, are you working?",
+        maxTokens: 50,
+      });
+      
+      return NextResponse.json({ 
+        success: true, 
+        message: "API key is working correctly",
+        response: text
+      });
+    } catch (apiError) {
+      console.error('OpenAI API error:', apiError);
+      return NextResponse.json({ 
+        success: false, 
+        message: "API key is not working correctly",
+        error: apiError instanceof Error ? apiError.message : String(apiError)
+      }, { status: 500 });
+    }
   } catch (error) {
-    console.error('OpenAI API error:', error);
+    console.error('Server error:', error);
     return NextResponse.json({ 
       success: false, 
-      message: "API key is not working correctly",
+      message: "Server error occurred",
       error: error instanceof Error ? error.message : String(error)
     }, { status: 500 });
   }

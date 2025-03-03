@@ -9,7 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ArrowUp } from "lucide-react"
 import { streamText } from "ai"
-import { openai } from "@ai-sdk/openai"
+import { getOpenAIModel } from "@/lib/openai-config"
 
 interface ChatMessage {
   role: "user" | "assistant"
@@ -61,7 +61,7 @@ export function ChatInterface({ documentContent, onInsertText }: ChatInterfacePr
 
       // Stream the response
       const result = streamText({
-        model: openai("gpt-4o"),
+        model: getOpenAIModel("gpt-4o"),
         system: `You are an AI writing assistant helping a user with their document. 
                 Be concise, helpful, and focus on improving the user's writing. 
                 Provide specific suggestions when asked.
@@ -73,7 +73,7 @@ export function ChatInterface({ documentContent, onInsertText }: ChatInterfacePr
               const newMessages = [...prev]
               const lastMessage = newMessages[newMessages.length - 1]
               if (lastMessage.role === "assistant") {
-                lastMessage.content += chunk.text
+                lastMessage.content += chunk.textDelta
               }
               return newMessages
             })
@@ -81,7 +81,7 @@ export function ChatInterface({ documentContent, onInsertText }: ChatInterfacePr
         },
       })
 
-      await result.text
+      await result
     } catch (error) {
       console.error("Error streaming response:", error)
       setMessages((prev) => {
