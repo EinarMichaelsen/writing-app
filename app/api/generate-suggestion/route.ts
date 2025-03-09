@@ -1,194 +1,244 @@
-import { NextResponse } from 'next/server';
-import OpenAI from 'openai';
+import { NextResponse } from "next/server";
+import OpenAI from "openai";
+import { sanitizeMarkdown } from "../../lib/markdown-utils";
 
-// Set a reasonable timeout for the DeepSeek API call - shorter than Vercel's 60s limit
-const API_TIMEOUT = 10000; // Reduced to 10 seconds
+// Set a timeout for the DeepSeek API call - reduced for better responsiveness
+const TIMEOUT_MS = 3000; // 3 seconds for much faster completions 
 
-// Configure for execution
-export const config = {
-  maxDuration: 25, // Reduced from 58 to 25 seconds to ensure faster response
-  runtime: 'edge', // Use edge runtime for better performance
+// Configure for longer execution in production
+export const maxDuration = 30; // seconds
+
+// Improved system prompt with special attention to paragraph and sentence structure
+const SYSTEM_PROMPT = `You are an intelligent writing assistant that provides seamless text continuations like GitHub Copilot or Cursor.
+Your task is to continue the user's text naturally, as if you were completing their thought mid-sentence or starting a new sentence/paragraph if appropriate.
+
+IMPORTANT INSTRUCTIONS:
+- Detect if the user is at the end of a sentence (period, question mark, etc.) or paragraph (double line break) and continue accordingly
+- For incomplete sentences: continue naturally from the exact point where the text ended
+- For complete sentences (ending with period, question mark, etc.): start a new sentence that follows logically 
+- For ends of paragraphs: start a new paragraph with a related but slightly different thought
+- Match the user's tone, style, vocabulary, and format precisely
+- Continue with the same subject matter and context as the user's writing
+- Keep completions concise and focused (2-3 sentences at most)
+- Never add commentary, explanations, or annotations`;
+
+// Specialized prompt for Markdown content with structure awareness
+const MARKDOWN_PROMPT = `You are an expert writing assistant that continues the user's writing naturally in Markdown format.
+
+CRITICAL INSTRUCTIONS:
+1. Analyze the user's text structure carefully:
+   - If they are mid-sentence, continue that sentence naturally
+   - If they ended with a period/question mark, start a new sentence
+   - If they ended a paragraph, start a new related paragraph
+   - If they were creating a list, continue the list with similar items
+   - If they were writing a heading, continue with body text
+
+2. Continue the user's exact writing content and subject matter
+3. Match their tone, style, and formatting precisely
+4. Maintain the exact same writing quality and complexity
+5. Never write about Markdown itself or explain formatting
+6. Do not add meta-commentary or suggestions
+7. Maintain the same patterns of sentence length and complexity`;
+
+// Detect sentence and paragraph endings
+function analyzeTextStructure(text: string) {
+  const trimmedText = text.trim();
+  // Check if text ends with common sentence-ending punctuation
+  const endsSentence = /[.!?:]\s*$/.test(trimmedText);
+  // Check if text ends with a new paragraph marker (double line break, etc.)
+  const endsWithNewline = /\n\s*\n\s*$/.test(text) || /\n\s*$/.test(text);
+  // Check if it's a list item
+  const isList = /^[\s\n]*([-*+]|\d+\.)\s/.test(trimmedText.split('\n').pop() || '');
+  // Check if it's a heading
+  const isHeading = /^[\s\n]*#{1,6}\s/.test(trimmedText.split('\n').pop() || '');
+  
+  return {
+    endsSentence,
+    endsWithNewline,
+    isList,
+    isHeading,
+    trimmedText
+  };
 }
 
-// Simple local fallback generation function
-function generateSimpleFallback(text: string): string {
-  if (!text || text.length < 2) return "and then";
+// Configure the DeepSeek client
+function getDeepSeekClient() {
+  const apiKey = process.env.DEEPSEEK_API_KEY || "";
   
-  // Get the last few words
-  const words = text.trim().split(/\s+/);
-  const lastWord = words[words.length - 1];
-  
-  // Simple fallback options based on the last word
-  if (lastWord.endsWith('.')) return "The";
-  if (lastWord.endsWith('?')) return "I";
-  if (lastWord.endsWith('!')) return "This";
-  
-  // Common continuations
-  if (lastWord === "the") return "most";
-  if (lastWord === "a") return "few";
-  if (lastWord === "to") return "be";
-  if (lastWord === "and") return "then";
-  if (lastWord === "in") return "the";
-  if (lastWord === "of") return "the";
-  if (lastWord === "with") return "the";
-  
-  // Default fallback is to repeat the last word + ellipsis
-  return `${lastWord}...`;
+  return new OpenAI({
+    apiKey,
+    baseURL: "https://api.deepseek.com/v1", // Using v1 endpoint for reliability
+    timeout: TIMEOUT_MS,
+  });
+}
+
+function getDeepSeekModel() {
+  return "deepseek-chat"; // Using chat model for best results
 }
 
 export async function POST(request: Request) {
-  // Track processing time
-  const startTime = Date.now();
-  
-  // Add response headers for better connection management
-  const responseHeaders = new Headers({
-    'Connection': 'keep-alive',
-    'Keep-Alive': 'timeout=25', // 25 seconds keep-alive
-    'Cache-Control': 'no-store, private',
-    'Content-Type': 'application/json',
-  });
+  // Add response headers for better performance
+  const headers = {
+    "Cache-Control": "no-store, max-age=0",
+    "Connection": "keep-alive",
+  };
 
   try {
-    // Parse the request early to fail fast if malformed
-    let text: string;
-    let maxTokens: number = 15; // Reduced from 100 to 15
-    let temperature: number = 0.7;
-    
-    try {
-      const body = await request.json();
-      text = body.text || '';
-      maxTokens = body.maxTokens || maxTokens;
-      temperature = body.temperature || temperature;
-      
-      if (!text) {
-        return NextResponse.json(
-          { error: "Text is required", suggestion: "" },
-          { status: 400, headers: responseHeaders }
-        );
-      }
-    } catch (parseError) {
-      console.error("Failed to parse request body:", parseError);
+    // Check if DeepSeek API key is configured
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+      console.error("DeepSeek API key not configured");
       return NextResponse.json(
-        { error: "Invalid request format", suggestion: "" },
-        { status: 400, headers: responseHeaders }
+        { suggestion: "", error: "DeepSeek API key not configured" },
+        { status: 500, headers }
       );
     }
-    
-    // Limit to just the last 50 characters for extremely fast processing
-    const lastChars = text.slice(-50); 
-    
-    // Check if DeepSeek API key is set
-    const apiKey = process.env.DEEPSEEK_API_KEY;
-    
-    // If no API key, just use the local fallback immediately
-    if (!apiKey) {
-      console.warn("DeepSeek API key not found, using local fallback");
-      const fallbackSuggestion = generateSimpleFallback(lastChars);
-      return NextResponse.json({ 
-        suggestion: fallbackSuggestion,
-        fallback: true,
-        processingTime: Date.now() - startTime
-      }, { 
-        headers: responseHeaders 
-      });
+
+    // Parse the request body
+    const { text, isMarkdown = false, maxTokens = 15, temperature = 0.1 } = await request.json();
+
+    // Ensure we have text to work with
+    if (!text || typeof text !== "string") {
+      console.error("Invalid text input");
+      return NextResponse.json(
+        { suggestion: "", error: "Invalid text input" },
+        { status: 400, headers }
+      );
     }
 
-    // Use a simplified prompt for faster processing
-    const prompt = `Continue this text: "${lastChars}"`;
+    // Extract up to 3000 characters with smarter context handling
+    // Always include the entire last paragraph for better coherence
+    let context = text;
+    if (text.length > 3000) {
+      // Find a good breakpoint (paragraph or sentence)
+      const lastParagraphMatch = text.slice(-3000).match(/(?:\n\s*\n|\r\n\s*\r\n)/);
+      const breakPoint = lastParagraphMatch && lastParagraphMatch.index !== undefined
+        ? text.length - 3000 + lastParagraphMatch.index 
+        : text.length - 3000;
+      context = text.slice(breakPoint);
+    }
     
+    // Analyze the text structure for better completions
+    const structure = analyzeTextStructure(context);
+
+    // Create a DeepSeek client
+    const client = getDeepSeekClient();
+
     try {
-      // Initialize DeepSeek client with tight timeout
-      const deepseek = new OpenAI({
-        apiKey,
-        baseURL: "https://api.deepseek.com/v1",
-        timeout: API_TIMEOUT,
-        maxRetries: 0, // No retries at SDK level, we handle them ourselves
+      const startTime = Date.now();
+      
+      // Select the appropriate prompt
+      const systemPrompt = isMarkdown ? MARKDOWN_PROMPT : SYSTEM_PROMPT;
+      
+      // Enhance prompt with structure info for better completions
+      let enhancedPrompt = systemPrompt;
+      if (structure.endsSentence) {
+        enhancedPrompt += "\n\nNote: The user's text ends with a complete sentence. Start a new sentence that follows logically.";
+      } else if (structure.endsWithNewline) {
+        enhancedPrompt += "\n\nNote: The user's text ends with a paragraph. Start a new paragraph with a related thought.";
+      } else if (structure.isList) {
+        enhancedPrompt += "\n\nNote: The user is writing a list. Continue with another list item in the same format.";
+      } else if (structure.isHeading) {
+        enhancedPrompt += "\n\nNote: The user just wrote a heading. Continue with body text under that heading.";
+      } else {
+        enhancedPrompt += "\n\nNote: The user is mid-sentence. Continue that exact sentence naturally.";
+      }
+
+      // Generate a completion with optimized parameters for faster response
+      const completion = await client.chat.completions.create({
+        model: getDeepSeekModel(),
+        messages: [
+          {
+            role: "system",
+            content: enhancedPrompt
+          },
+          { role: "user", content: context }
+        ],
+        max_tokens: maxTokens,
+        temperature: temperature,
+        top_p: 0.1,
+        presence_penalty: 0.0, // Reduced further for faster suggestions
+        frequency_penalty: 0.0, // Reduced further for faster suggestions
+        stream: false
       });
+
+      const endTime = Date.now();
+      const timeTaken = endTime - startTime;
       
-      // Create an AbortController for the timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
-      
-      // Create a Promise that resolves to either the API response or a timeout/error
-      const completionPromise = Promise.race([
-        // DeepSeek API call
-        deepseek.chat.completions.create({
-          model: "deepseek-chat",
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: Math.min(maxTokens, 10), // Limit to 10 tokens max
-          temperature: temperature,
-        }),
+      // Extract the suggestion from the completion
+      let suggestion = completion.choices[0]?.message?.content || "";
+
+      // Minimal cleaning of the suggestion
+      suggestion = suggestion.trim();
+
+      // Process markdown content appropriately
+      if (isMarkdown) {
+        suggestion = sanitizeMarkdown(suggestion);
         
-        // Timeout promise that triggers if the API takes too long
-        new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('API request timed out')), API_TIMEOUT);
-        })
-      ]).catch(error => {
-        // If API call fails for any reason, use the local fallback
-        clearTimeout(timeoutId);
-        console.warn("DeepSeek API error, using fallback:", error.message || "Unknown error");
-        return null;
-      }).finally(() => {
-        clearTimeout(timeoutId);
-      });
-      
-      // Wait for the API response or timeout
-      const completion = await completionPromise as OpenAI.Chat.Completions.ChatCompletion | null;
-      
-      // If we got a valid response, return it
-      if (completion) {
-        const suggestion = completion.choices[0]?.message.content?.trim() || "";
+        // Ensure there are no HTML tags in the markdown suggestion
+        if (suggestion.includes('<') && suggestion.includes('>')) {
+          suggestion = suggestion.replace(/<\/?[^>]+(>|$)/g, "");
+        }
+      } else {
+        // Clean HTML tags from non-HTML content when appropriate
+        if (suggestion.startsWith('<p>') || suggestion.includes('</p>') || 
+            suggestion.includes('<h') || suggestion.includes('</h')) {
+          suggestion = suggestion.replace(/<\/?[^>]+(>|$)/g, "");
+        }
         
-        // Calculate total processing time
-        const processingTime = Date.now() - startTime;
-        console.log(`Suggestion generated in ${processingTime}ms`);
-        
-        return NextResponse.json({ 
-          suggestion,
-          processingTime 
-        }, { 
-          headers: responseHeaders 
-        });
+        // Remove any markdown or code formatting
+        if (suggestion.startsWith("```") && suggestion.includes("\n")) {
+          suggestion = suggestion.split("\n").slice(1).join("\n");
+          if (suggestion.endsWith("```")) {
+            suggestion = suggestion.slice(0, -3).trim();
+          }
+        }
+      }
+
+      // Intelligently adjust the suggestion based on context
+      // If text ends with space and suggestion starts with space, remove one
+      if (text.endsWith(" ") && suggestion.startsWith(" ")) {
+        suggestion = suggestion.substring(1);
       }
       
-      // If we reach here, the API call failed and we need to use local fallback
-      const fallbackSuggestion = generateSimpleFallback(lastChars);
+      // If text doesn't end with space and suggestion doesn't start with punctuation, add space
+      if (!text.endsWith(" ") && !suggestion.startsWith(".") && 
+          !suggestion.startsWith(",") && !suggestion.startsWith("!") && 
+          !suggestion.startsWith("?") && !suggestion.startsWith(":") && 
+          !suggestion.startsWith(";") && !suggestion.startsWith(")") &&
+          !text.endsWith("\n") && suggestion.length > 0) {
+        suggestion = " " + suggestion;
+      }
+
+      // Return the suggestion with timing info
       return NextResponse.json({ 
-        suggestion: fallbackSuggestion,
-        fallback: true,
-        processingTime: Date.now() - startTime
-      }, { 
-        headers: responseHeaders 
-      });
-    } catch (apiError: any) {
-      // Handle any unexpected errors from the DeepSeek API call
-      console.error("DeepSeek API unexpected error:", apiError);
+        suggestion, 
+        timeTaken,
+        analysis: {
+          endsSentence: structure.endsSentence,
+          endsWithNewline: structure.endsWithNewline,
+          isList: structure.isList,
+          isHeading: structure.isHeading
+        }
+      }, { headers });
+    } catch (error: any) {
+      // Handle errors with consistent response formatting
+      console.error("Error generating completion:", error);
       
-      // Use local fallback for any API errors
-      const fallbackSuggestion = generateSimpleFallback(lastChars);
-      return NextResponse.json({ 
-        suggestion: fallbackSuggestion,
-        fallback: true,
-        error: apiError.message || "API error",
-        processingTime: Date.now() - startTime
-      }, { 
-        headers: responseHeaders 
-      });
+      return NextResponse.json(
+        { 
+          suggestion: "", 
+          error: error.message || "Failed to generate suggestion",
+          status: error.status || 500
+        },
+        { status: error.status || 500, headers }
+      );
     }
-  } catch (error: any) {
-    // Handle any other unexpected errors
-    console.error("Unexpected error generating suggestion:", error);
-    
-    // Always return a 200 response with a fallback suggestion
-    // This prevents the client from seeing errors
-    return NextResponse.json({ 
-      suggestion: "and then",
-      fallback: true,
-      error: error.message || "Unknown error",
-      processingTime: Date.now() - startTime
-    }, { 
-      status: 200, // Always return 200 to avoid client-side errors
-      headers: responseHeaders 
-    });
+  } catch (error) {
+    console.error("Error processing request:", error);
+    return NextResponse.json(
+      { suggestion: "", error: "Internal server error" },
+      { status: 500, headers }
+    );
   }
 } 

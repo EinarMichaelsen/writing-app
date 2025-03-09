@@ -1,7 +1,4 @@
 {
-  "/editor/tiptap-editor/page": "app/editor/tiptap-editor/page.js",
-  "/editor/[id]/page": "app/editor/[id]/page.js",
-  "/editor/canvas-tiptap/page": "app/editor/canvas-tiptap/page.js",
-  "/editor/clean-canvas/page": "app/editor/clean-canvas/page.js",
-  "/editor/hybrid-canvas/page": "app/editor/hybrid-canvas/page.js"
+  "/api/generate-suggestion/route": "app/api/generate-suggestion/route.js",
+  "/editor/[id]/page": "app/editor/[id]/page.js"
 }
